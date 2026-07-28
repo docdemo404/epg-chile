@@ -19,6 +19,18 @@ const state = {
 };
 
 const $ = (sel) => document.querySelector(sel);
+
+/**
+ * Escapa texto que se interpola en `innerHTML`.
+ *
+ * Los nombres de canal y los títulos vienen de XMLTV de terceros, así que un
+ * `&` o un `<` en el nombre ya rompía el marcado antes de plantearse nada peor.
+ */
+const esc = (value) =>
+  String(value ?? '').replace(/[&<>"']/g, (ch) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch],
+  );
+
 const fmtTime = (ms) =>
   new Date(ms).toLocaleString('es-CL', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -78,9 +90,9 @@ async function loadSources() {
     const card = document.createElement('div');
     card.className = 'source-card';
     card.innerHTML = `
-      <div class="name"><span class="dot ${cls}"></span>${s.id}</div>
+      <div class="name"><span class="dot ${cls}"></span>${esc(s.id)}</div>
       <div class="meta">${s.channels} canales · ${s.programmes} progs</div>
-      <div class="meta">${s.enabled ? `últ. ok: ${when}` : 'deshabilitada'}</div>`;
+      <div class="meta">${s.enabled ? `últ. ok: ${esc(when)}` : 'deshabilitada'}</div>`;
     if (s.error) card.title = s.error;
     box.appendChild(card);
 
@@ -148,29 +160,55 @@ function renderChannels() {
   const box = $('#channel-list');
   box.innerHTML = '';
 
+  // Filtrar hasta no dejar nada dejaba un hueco en blanco, sin decir que el
+  // culpable era el filtro y no la falta de canales.
+  if (!list.length) {
+    box.innerHTML = state.channels.length
+      ? '<p class="empty">Ningún canal coincide con el filtro. ' +
+        '<button type="button" class="linkish" id="clear-filters">Quitar los filtros</button></p>'
+      : '<p class="empty">Todavía no hay canales. Lanza una actualización de fuentes.</p>';
+    $('#clear-filters')?.addEventListener('click', () => {
+      $('#search').value = '';
+      $('#filter-source').value = '';
+      $('#filter-link').value = '';
+      renderChannels();
+    });
+    $('#channel-counter').textContent = `0 de ${state.channels.length}`;
+    updateSelectedCounter();
+    return;
+  }
+
   for (const c of list) {
     const row = document.createElement('div');
-    row.className = 'channel' + (state.selected.has(c.id) ? ' selected' : '');
+    row.className =
+      'channel' +
+      (state.selected.has(c.id) ? ' selected' : '') +
+      (state.activeChannel?.id === c.id ? ' peeking' : '');
     row.dataset.id = c.id;
 
     const nums = Object.values(c.numbers);
-    const tags = c.sources.map((s) => `<span class="tag src">${s}</span>`).join('');
+    const tags = c.sources.map((s) => `<span class="tag src">${esc(s)}</span>`).join('');
     // Un canal vinculado pero sin emisiones suele indicar un alias mal puesto.
     const empty = c.programmes === 0 ? '<span class="tag warn">sin programación</span>' : '';
 
     row.innerHTML = `
-      <input type="checkbox" ${state.selected.has(c.id) ? 'checked' : ''}>
-      ${c.logo ? `<img src="${c.logo}" alt="" loading="lazy">` : '<img alt="">'}
+      <input type="checkbox" ${state.selected.has(c.id) ? 'checked' : ''}
+             aria-label="Marcar ${esc(c.name)}">
+      ${c.logo ? `<img src="${esc(c.logo)}" alt="" loading="lazy">` : '<img alt="">'}
       <div class="info">
-        <div class="nm">${nums.length ? `<span class="tag">${nums[0]}</span> ` : ''}${c.name}</div>
+        <div class="nm">${nums.length ? `<span class="tag">${esc(nums[0])}</span> ` : ''}${esc(c.name)}</div>
         <div class="meta">${tags}${empty}<span>${c.programmes} progs</span></div>
-      </div>`;
+      </div>
+      <button type="button" class="peek" title="Ver la programación de ${esc(c.name)}">Ver</button>`;
 
-    row.querySelector('input').addEventListener('click', (ev) => {
+    // La casilla no lleva manejador propio a propósito: su clic burbujea hasta
+    // la fila, que alterna el estado y repinta el listado. Si además llamara a
+    // `toggle`, marcar por la casilla contaría dos veces y no haría nada.
+    row.querySelector('.peek').addEventListener('click', (ev) => {
       ev.stopPropagation();
-      toggle(c.id);
+      showPreview(c);
     });
-    row.addEventListener('click', () => showPreview(c));
+    row.addEventListener('click', () => toggle(c.id));
     box.appendChild(row);
   }
 
@@ -185,7 +223,17 @@ function toggle(id) {
 }
 
 function updateSelectedCounter() {
-  $('#selected-counter').textContent = `${state.selected.size} seleccionados`;
+  const n = state.selected.size;
+  $('#selected-counter').textContent =
+    n === 0 ? 'ningún canal marcado' : n === 1 ? '1 canal marcado' : `${n} canales marcados`;
+
+  // La barra solo aparece cuando hay algo marcado: en reposo no estorba, y al
+  // marcar el primer canal se hace evidente que existe un paso siguiente.
+  const bar = $('#selbar');
+  if (bar) {
+    bar.hidden = n === 0;
+    $('#selbar-n').textContent = String(n);
+  }
   renderEditingBar();
 }
 
@@ -261,13 +309,22 @@ async function showPreview(channel) {
   // JSON navegable multiplicaría el peso del sitio sin ganar mucho.
   if (state.static) return;
   state.activeChannel = channel;
+
+  // Se marca la fila sin volver a pintar el listado: un re-render perdería el
+  // scroll justo cuando acabas de encontrar el canal que buscabas.
+  for (const el of document.querySelectorAll('.channel.peeking')) el.classList.remove('peeking');
+  document.querySelector(`.channel[data-id="${channel.id}"]`)?.classList.add('peeking');
+
+  const label = $('#preview-of');
+  if (label) label.textContent = channel.name;
+
   const box = $('#preview');
   box.innerHTML = '<p class="hint">Cargando…</p>';
 
   try {
     const programmes = await api(`/api/programmes?channel=${channel.id}&limit=40`);
     if (!programmes.length) {
-      box.innerHTML = `<p class="hint">${channel.name} no tiene programación en la ventana actual.</p>`;
+      box.innerHTML = `<p class="hint">${esc(channel.name)} no tiene programación en la ventana actual.</p>`;
       return;
     }
     box.innerHTML = '';
@@ -277,15 +334,15 @@ async function showPreview(channel) {
       // La procedencia es lo que permite ver el merge funcionando: qué fuente
       // puso el título, cuál la sinopsis y cuál la imagen.
       const prov = Object.entries(p.provenance || {})
-        .map(([field, src]) => `<span class="tag">${field}: ${src}</span>`)
+        .map(([field, src]) => `<span class="tag">${esc(field)}: ${esc(src)}</span>`)
         .join('');
       el.innerHTML = `
-        ${p.image ? `<img src="${p.image}" alt="" loading="lazy">` : '<img alt="">'}
+        ${p.image ? `<img src="${esc(p.image)}" alt="" loading="lazy">` : '<img alt="">'}
         <div class="body">
           <div class="when">${fmtTime(p.start)} – ${new Date(p.stop).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}</div>
-          <div class="ttl">${p.title}</div>
-          ${p.subTitle ? `<div class="dsc">${p.subTitle}</div>` : ''}
-          ${p.desc ? `<div class="dsc">${p.desc.slice(0, 220)}</div>` : ''}
+          <div class="ttl">${esc(p.title)}</div>
+          ${p.subTitle ? `<div class="dsc">${esc(p.subTitle)}</div>` : ''}
+          ${p.desc ? `<div class="dsc">${esc(p.desc.slice(0, 220))}</div>` : ''}
           <div class="prov">${prov}</div>
         </div>`;
       box.appendChild(el);
@@ -353,7 +410,7 @@ async function loadProfiles() {
       el.className = 'profile';
       const top = document.createElement('div');
       top.className = 'ptop';
-      top.innerHTML = `<div class="phead"><div class="pname">${p.name} <span class="tag">${p.channels} canales</span></div></div>`;
+      top.innerHTML = `<div class="phead"><div class="pname">${esc(p.name)} <span class="tag">${p.channels} canales</span></div></div>`;
       el.append(top, staticLinkButtons(p.files));
       box.appendChild(el);
     }
@@ -372,9 +429,15 @@ async function loadProfiles() {
 
     const head = document.createElement('div');
     head.className = 'phead';
-    head.innerHTML = `<div class="pname">${p.name} <span class="tag">${p.channelIds.length} canales</span></div>`;
+    head.innerHTML = `<div class="pname">${esc(p.name)} <span class="tag">${p.channelIds.length} canales</span></div>`;
     head.title = 'Editar los canales de este enlace';
     head.addEventListener('click', () => startEditing(p));
+
+    const edit = document.createElement('button');
+    edit.className = 'edit';
+    edit.textContent = 'Editar';
+    edit.title = 'Cambiar los canales de este enlace sin cambiar su URL';
+    edit.addEventListener('click', () => startEditing(p));
 
     const del = document.createElement('button');
     del.className = 'del';
@@ -387,9 +450,13 @@ async function loadProfiles() {
       loadProfiles();
     });
 
+    const acts = document.createElement('div');
+    acts.className = 'pacts';
+    acts.append(edit, del);
+
     const top = document.createElement('div');
     top.className = 'ptop';
-    top.append(head, del);
+    top.append(head, acts);
 
     el.append(top, linkButtons(p.slug));
     box.appendChild(el);
@@ -452,7 +519,7 @@ function profileYaml(name, ids) {
  */
 async function unifySelected() {
   const ids = [...state.selected];
-  if (ids.length < 2) return toast('Selecciona al menos dos canales para unificar', true);
+  if (ids.length < 2) return toast('Marca al menos dos canales para unificar', true);
 
   const byId = new Map(state.channels.map((c) => [c.id, c]));
   const picked = ids.map((id) => byId.get(id)).filter(Boolean);
@@ -513,11 +580,11 @@ async function loadUploads() {
       : `${Math.round(f.bytes / 1024)} KB`;
     el.innerHTML = `
       <div class="uinfo">
-        <div class="uname">${f.name}</div>
+        <div class="uname">${esc(f.name)}</div>
         <div class="meta">${
           f.error
-            ? `<span class="tag warn">${f.error}</span>`
-            : `<span class="tag">${f.format}</span><span>${f.channels} canales · ${f.programmes} progs · ${kb}</span>`
+            ? `<span class="tag warn">${esc(f.error)}</span>`
+            : `<span class="tag">${esc(f.format)}</span><span>${f.channels} canales · ${f.programmes} progs · ${kb}</span>`
         }</div>
       </div>
       <button class="del" title="Quitar">×</button>`;
@@ -697,10 +764,21 @@ $('#sel-multi').addEventListener('click', () => {
   renderChannels();
 });
 
+$('#selbar-clear').addEventListener('click', () => {
+  state.selected.clear();
+  renderChannels();
+});
+// El paso 2 está en la otra columna y en móvil queda debajo del listado: el
+// botón lleva hasta él y deja el cursor donde toca escribir.
+$('#selbar-go').addEventListener('click', () => {
+  $('#links-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!state.editing) $('#profile-name').focus({ preventScroll: true });
+});
+
 async function createLink() {
   const name = $('#profile-name').value.trim();
   if (!name) return toast('Ponle un nombre al enlace', true);
-  if (!state.selected.size) return toast('Selecciona al menos un canal', true);
+  if (!state.selected.size) return toast('Marca al menos un canal', true);
 
   if (state.static) {
     const yaml = profileYaml(name, [...state.selected]);

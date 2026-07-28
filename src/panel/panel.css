@@ -25,6 +25,13 @@
 
 * { box-sizing: border-box; }
 
+/* `hidden` lo pisaba cualquier regla con `display`, y aquí las hay: `.editing`
+   es flex y `.field` es block. El resultado era que la barra de «Editando» y la
+   caja de YAML se veían SIEMPRE, vacías, junto a la de crear. Que un atributo
+   que solo dice «esto no está» pierda contra una regla de maquetación es justo
+   el caso para el que existe `!important`. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -62,14 +69,28 @@ body {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.ghost { background: transparent; }
 .btn.tiny { padding: 4px 9px; font-size: 12.5px; }
+.btn.danger:hover { border-color: var(--warn); color: var(--warn); }
+
+.sources-bar {
+  padding: 10px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.sources-label {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 8px;
+}
+.legend {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-weight: 400; text-transform: none; letter-spacing: 0;
+}
 
 .sources {
   display: flex;
   gap: 10px;
-  padding: 12px 20px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  padding-bottom: 2px;
 }
 
 .source-card {
@@ -87,6 +108,11 @@ body {
 .dot.error { background: var(--err); }
 .dot.off { background: var(--muted); }
 
+/* Dos columnas independientes, no una rejilla de celdas.
+   Con `grid` las secciones se colocaban por filas, así que la fila 1 medía lo
+   que el listado de canales —62vh— y «Crea tu enlace», que iba en la fila 2,
+   caía fuera de pantalla: había que hacer scroll a ciegas para ver el resultado
+   de lo que acababas de marcar. Cada columna apila lo suyo y eso desaparece. */
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
@@ -94,6 +120,7 @@ body {
   padding: 16px 20px 40px;
   align-items: start;
 }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
 
 .panel {
@@ -107,8 +134,22 @@ body {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 10px; margin-bottom: 10px;
 }
-.panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.panel-head h2 {
+  margin: 0; font-size: 15px; font-weight: 650;
+  display: flex; align-items: center; gap: 8px;
+}
 .counter { color: var(--muted); font-size: 13px; }
+.soft { color: var(--muted); font-style: normal; opacity: .85; }
+
+/* Numerar los dos paneles principales es lo que convierte tres cajas sueltas en
+   un recorrido: marcar canales y luego crear el enlace, en ese orden. */
+.step {
+  flex: 0 0 auto;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
 
 .filters { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .filters input, .filters select, .field input[type="text"] {
@@ -121,9 +162,14 @@ body {
   min-width: 0;
 }
 .filters input { flex: 1 1 180px; }
-.bulk { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.bulk { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+.bulk-label { color: var(--muted); font-size: 12.5px; margin-right: 2px; }
+/* Separar lo que solo marca de lo que modifica la guía de verdad. */
+.bulk .danger { margin-left: auto; }
 
 .channel-list { max-height: 62vh; overflow-y: auto; border-radius: 8px; }
+.empty { color: var(--muted); font-size: 13.5px; text-align: center; padding: 26px 12px; }
+.empty .linkish { font-size: inherit; }
 
 .channel {
   display: flex; align-items: center; gap: 10px;
@@ -135,6 +181,34 @@ body {
 .channel:hover { background: var(--surface-2); }
 .channel.selected { background: var(--surface-2); border-color: var(--accent); }
 .channel input { flex: 0 0 auto; accent-color: var(--accent); }
+
+/* La fila entera marca el canal, que es lo que espera cualquiera al ver una
+   casilla. Antes la fila abría la vista previa y solo la casilla marcaba: el
+   clic natural hacía lo contrario de lo que parecía. La previa pasa a un botón
+   propio, visible al pasar por encima para no ensuciar el listado. */
+.channel .peek {
+  flex: 0 0 auto;
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--muted); font-size: 12px; padding: 3px 8px; cursor: pointer;
+  opacity: 0; transition: opacity .12s, color .12s, border-color .12s;
+}
+.channel:hover .peek, .channel .peek:focus-visible { opacity: 1; }
+.channel .peek:hover { color: var(--accent); border-color: var(--accent); }
+.channel.peeking .peek { opacity: 1; color: var(--accent); border-color: var(--accent); }
+@media (hover: none) { .channel .peek { opacity: 1; } }
+
+/* Resumen fijo al pie del listado: cuántos llevas y cuál es el paso siguiente. */
+.selbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  position: sticky; bottom: 0;
+  margin: 10px -16px -14px; padding: 10px 16px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-size: 13px;
+}
+.selbar-count { flex: 1 1 auto; color: var(--muted); }
+.selbar-count strong { color: var(--text); }
 .channel img {
   width: 34px; height: 34px; object-fit: contain;
   background: #0008; border-radius: 6px; flex: 0 0 auto;
@@ -151,7 +225,7 @@ body {
 .tag.warn { border-color: var(--warn); color: var(--warn); }
 
 .field { display: block; margin-bottom: 14px; }
-.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.field > span, .field > label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .row { display: flex; gap: 8px; }
 .row.wrap { flex-wrap: wrap; }
 .row input { flex: 1; }
@@ -165,6 +239,14 @@ body {
 .ptop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .phead { cursor: pointer; min-width: 0; }
 .pname { font-weight: 550; }
+/* «Editar» escrito. Antes la única pista de que un enlace se podía editar era
+   un `title` al pasar por encima del nombre, que no se ve en una tableta. */
+.pacts { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.profile .edit {
+  background: none; border: none; color: var(--muted);
+  cursor: pointer; font-size: 12.5px; padding: 2px 6px; border-radius: 6px;
+}
+.profile .edit:hover { color: var(--accent); }
 .profile .del {
   background: none; border: none; color: var(--muted);
   cursor: pointer; font-size: 18px; line-height: 1; padding: 0 4px; flex: 0 0 auto;
@@ -246,6 +328,25 @@ body {
 .editing .einfo .tag { margin-left: 6px; }
 .editing .row { display: flex; gap: 8px; flex: 0 0 auto; }
 
+/* Panel plegable para lo poco habitual: subir guías propias y dar de alta URLs.
+   Abierto de par en par competía por el sitio con «Crea tu enlace», que es a lo
+   que se entra el 90 % de las veces. */
+details.adv { padding: 0; }
+details.adv > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; cursor: pointer; list-style: none;
+}
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::before {
+  content: '▸'; color: var(--muted); font-size: 11px;
+  transition: transform .15s; flex: 0 0 auto;
+}
+details.adv[open] > summary::before { transform: rotate(90deg); }
+details.adv > summary:hover { color: var(--accent); }
+details.adv > summary h2 { margin: 0; font-size: 15px; font-weight: 650; }
+details.adv > summary .counter { margin-left: 6px; font-weight: 400; }
+details.adv .adv-body { padding: 0 16px 14px; }
+
 /* Alta de guías remotas por URL.
    Ojo con el nombre: `.sub` ya lo usa el subtítulo de la cabecera, y una regla
    suelta con ese nombre le colaba aquí un borde superior y márgenes. */
@@ -274,10 +375,18 @@ body {
 }
 
 /* El panel es el mismo archivo local y publicado; solo cambia qué se muestra.
-   Por defecto se asume servidor, y `is-static` invierte la visibilidad. */
-.static-only { display: none; }
-body.is-static .static-only { display: revert; }
-body.is-static .server-only { display: none; }
+   Por defecto se asume servidor, y `is-static` invierte la visibilidad.
+
+   Va con `!important` por lo mismo que `[hidden]`: `.static-only` pesa igual que
+   `.field > span` y perdía por orden, así que las dos variantes de un rótulo se
+   veían a la vez —«Tus enlaces» y «Enlaces publicados», una debajo de la otra—.
+   Esconder algo no es una decisión de maquetación y no debe competir con ella. */
+.static-only { display: none !important; }
+body.is-static .server-only { display: none !important; }
+body.is-static .static-only { display: revert !important; }
+/* `revert` devuelve el valor del navegador, que para un span es `inline`. Los
+   rótulos de `.field` son bloques con margen: hay que reponerlo a mano. */
+body.is-static .field > span.static-only { display: block !important; }
 
 .yaml {
   background: var(--surface-2); border: 1px solid var(--border);

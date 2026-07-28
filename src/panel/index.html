@@ -26,142 +26,182 @@
     <div class="detail"></div>
   </div>
 
-  <section class="sources" id="sources"></section>
+  <!-- Las tarjetas de fuentes no se explicaban solas: sin rótulo ni leyenda
+       parecían pestañas o filtros. Ahora dicen qué son y qué significa el punto. -->
+  <section class="sources-bar">
+    <div class="sources-label">
+      Fuentes
+      <span class="legend"><span class="dot ok"></span>al día</span>
+      <span class="legend"><span class="dot error"></span>con error</span>
+      <span class="legend"><span class="dot off"></span>apagada</span>
+    </div>
+    <div class="sources" id="sources"></div>
+  </section>
 
   <main class="layout">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Canales</h2>
-        <span class="counter" id="channel-counter"></span>
-      </div>
+    <div class="col">
+      <section class="panel">
+        <div class="panel-head">
+          <h2><span class="step">1</span>Elige los canales</h2>
+          <span class="counter" id="channel-counter"></span>
+        </div>
 
-      <div class="filters">
-        <input type="search" id="search" placeholder="Buscar canal…" autocomplete="off">
-        <select id="filter-source">
-          <option value="">Todas las fuentes</option>
-        </select>
-        <select id="filter-link">
-          <option value="">Todos</option>
-          <option value="multi">Con respaldo (2+ fuentes)</option>
-          <option value="single">Una sola fuente</option>
-          <option value="empty">Sin programación</option>
-        </select>
-      </div>
+        <div class="filters">
+          <input type="search" id="search" placeholder="Buscar canal por nombre o número…"
+                 aria-label="Buscar canal" autocomplete="off">
+          <select id="filter-source" aria-label="Filtrar por fuente">
+            <option value="">Todas las fuentes</option>
+          </select>
+          <select id="filter-link" aria-label="Filtrar por cobertura">
+            <option value="">Cualquier cobertura</option>
+            <option value="multi">Con respaldo (2+ fuentes)</option>
+            <option value="single">De una sola fuente</option>
+            <option value="empty">Sin programación</option>
+          </select>
+        </div>
 
-      <div class="bulk">
-        <button class="btn tiny" id="sel-all">Seleccionar visibles</button>
-        <button class="btn tiny" id="sel-none">Limpiar</button>
-        <button class="btn tiny" id="sel-multi">Solo con respaldo</button>
-        <button class="btn tiny server-only" id="btn-unify" title="Fusiona los canales seleccionados en uno solo">
-          Unificar seleccionados
-        </button>
-      </div>
+        <div class="bulk">
+          <span class="bulk-label">Marcar</span>
+          <button class="btn tiny" id="sel-all">Los visibles</button>
+          <button class="btn tiny" id="sel-multi">Solo con respaldo</button>
+          <button class="btn tiny" id="sel-none">Ninguno</button>
+          <!-- Fusionar canales reescribe channel-aliases.yaml y no se deshace
+               desde aquí: se aparta de los botones de marcar, que no tocan nada. -->
+          <button class="btn tiny danger server-only" id="btn-unify"
+                  title="Fusiona los canales marcados en uno solo. Queda guardado y sobrevive a las reingestas">
+            Unificar marcados…
+          </button>
+        </div>
 
-      <div class="channel-list" id="channel-list"></div>
-    </section>
+        <div class="channel-list" id="channel-list"></div>
 
-    <section class="panel server-only" id="uploads-panel">
-      <div class="panel-head">
-        <h2>Añadir una guía propia</h2>
-        <span class="counter" id="uploads-counter"></span>
-      </div>
+        <!-- El listado tiene su propio scroll y la caja de crear vive en otra
+             columna: sin este resumen fijo no se ve cuánto llevas marcado ni
+             cuál es el paso siguiente. -->
+        <div class="selbar" id="selbar" hidden>
+          <span class="selbar-count"><strong id="selbar-n">0</strong> canales marcados</span>
+          <button class="btn tiny" id="selbar-clear">Desmarcar</button>
+          <button class="btn tiny primary" id="selbar-go">
+            <span class="server-only">Crear el enlace →</span>
+            <span class="static-only">Generar el perfil →</span>
+          </button>
+        </div>
+      </section>
+    </div>
 
-      <p class="hint tight">
-        Sube un XMLTV (<code>.xml</code>, <code>.xml.gz</code>) o el JSON que
-        exporta este proyecto. Se incorpora como una fuente más: entra en la
-        unificación de canales y rellena metadatos igual que las automáticas.
-      </p>
+    <div class="col">
+      <section class="panel" id="links-panel">
+        <div class="panel-head">
+          <h2><span class="step">2</span>Crea tu enlace</h2>
+          <span class="counter" id="selected-counter">ningún canal marcado</span>
+        </div>
 
-      <div class="dropzone" id="dropzone">
-        <input type="file" id="file-input" accept=".xml,.gz,.json" hidden>
-        <span>Arrastra el archivo aquí o <button type="button" class="linkish" id="btn-browse">búscalo</button></span>
-      </div>
-
-      <div id="uploads" class="uploads"></div>
-
-      <h3 class="feed-title">O añade una guía por URL</h3>
-      <p class="hint tight">
-        A diferencia de un archivo, la URL se vuelve a descargar en cada
-        actualización: úsala para guías de terceros que cambian solas. Se
-        comprueba al añadirla, así que una URL que no sirve no queda guardada.
-      </p>
-
-      <div class="feed-add">
-        <input type="url" id="feed-url" placeholder="https://ejemplo.com/guia.xml.gz" spellcheck="false">
-        <input type="text" id="feed-label" placeholder="Nombre (opcional)">
-        <button type="button" id="btn-add-feed">Añadir</button>
-      </div>
-
-      <div id="feeds" class="uploads"></div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Enlaces permanentes</h2>
-        <span class="counter" id="selected-counter">0 seleccionados</span>
-      </div>
-
-      <div class="export-box">
-        <div class="editing server-only" id="editing-bar" hidden>
-          <div class="einfo">
-            Editando <strong id="editing-name"></strong>
-            <span class="tag" id="editing-count"></span>
-            <div class="hint tight">
-              Cambia la selección de canales y guarda. La URL no cambia, así que
-              lo que ya tengas pegado en el reproductor sigue sirviendo.
+        <div class="export-box">
+          <div class="editing server-only" id="editing-bar" hidden>
+            <div class="einfo">
+              Editando <strong id="editing-name"></strong>
+              <span class="tag" id="editing-count"></span>
+              <div class="hint tight">
+                Cambia la selección de canales y guarda. La URL no cambia, así que
+                lo que ya tengas pegado en el reproductor sigue sirviendo.
+              </div>
+            </div>
+            <div class="row">
+              <button class="btn primary" id="btn-save-edit">Guardar cambios</button>
+              <button class="btn" id="btn-cancel-edit">Cancelar</button>
             </div>
           </div>
-          <div class="row">
-            <button class="btn primary" id="btn-save-edit">Guardar cambios</button>
-            <button class="btn" id="btn-cancel-edit">Cancelar</button>
+
+          <div class="field" id="create-box">
+            <label for="profile-name">
+              <span class="server-only">Ponle nombre y crea un enlace con los canales marcados</span>
+              <span class="static-only">Ponle nombre y genera el perfil</span>
+            </label>
+            <div class="row">
+              <input type="text" id="profile-name" placeholder="p. ej. Mi TV abierta">
+              <button class="btn primary" id="btn-save-profile">
+                <span class="server-only">Crear enlace</span>
+                <span class="static-only">Generar YAML</span>
+              </button>
+            </div>
+            <p class="hint tight server-only">
+              La URL es fija y siempre sirve la guía al día: pégala en Kodi,
+              Tvheadend, Jellyfin o Plex y se actualiza sola.
+            </p>
+            <p class="hint tight static-only">
+              El sitio es estático, así que el perfil se define en el repo: pega
+              este bloque en <code>config/profiles.yaml</code> y el siguiente
+              build publica su enlace.
+            </p>
+          </div>
+
+          <div class="field" id="yaml-box" hidden>
+            <span>Pega esto en <code>config/profiles.yaml</code></span>
+            <pre id="yaml-out" class="yaml"></pre>
+          </div>
+
+          <div class="field">
+            <span class="server-only">Tus enlaces <em class="soft">— pulsa un formato para copiar su URL</em></span>
+            <span class="static-only">Enlaces publicados <em class="soft">— pulsa un formato para copiar su URL</em></span>
+            <div id="profiles" class="profiles"></div>
+          </div>
+
+          <div class="field server-only">
+            <span>¿La quieres entera? Guía completa, sin marcar nada</span>
+            <div class="links-row" id="all-links"></div>
           </div>
         </div>
+      </section>
 
-        <label class="field" id="create-box">
-          <span class="server-only">Crear un enlace con los canales seleccionados</span>
-          <span class="static-only">Generar un perfil nuevo</span>
-          <div class="row">
-            <input type="text" id="profile-name" placeholder="p. ej. Mi TV abierta">
-            <button class="btn primary" id="btn-save-profile">
-              <span class="server-only">Crear enlace</span>
-              <span class="static-only">Generar YAML</span>
-            </button>
+      <section class="panel server-only">
+        <div class="panel-head">
+          <h2>Vista previa</h2>
+          <span class="counter" id="preview-of"></span>
+        </div>
+        <div id="preview" class="preview">
+          <p class="hint">Pulsa <strong>Ver</strong> en cualquier canal para revisar su
+          programación y de qué fuente salió cada dato.</p>
+        </div>
+      </section>
+
+      <!-- Plegado: añadir guías propias es lo raro, no lo habitual, y abierto
+           empujaba fuera de pantalla el paso 2, que es a lo que se viene. -->
+      <details class="panel adv server-only" id="uploads-panel">
+        <summary>
+          <h2>Añadir tus propias guías <span class="counter" id="uploads-counter"></span></h2>
+        </summary>
+
+        <div class="adv-body">
+          <p class="hint tight">
+            Sube un XMLTV (<code>.xml</code>, <code>.xml.gz</code>) o el JSON que
+            exporta este proyecto. Se incorpora como una fuente más: entra en la
+            unificación de canales y rellena metadatos igual que las automáticas.
+          </p>
+
+          <div class="dropzone" id="dropzone">
+            <input type="file" id="file-input" accept=".xml,.gz,.json" hidden>
+            <span>Arrastra el archivo aquí o <button type="button" class="linkish" id="btn-browse">búscalo</button></span>
           </div>
-          <p class="hint tight server-only">
-            La URL es fija y siempre sirve la guía al día: pégala en Kodi,
-            Tvheadend, Jellyfin o Plex y se actualiza sola.
+
+          <div id="uploads" class="uploads"></div>
+
+          <h3 class="feed-title">O añade una guía por URL</h3>
+          <p class="hint tight">
+            A diferencia de un archivo, la URL se vuelve a descargar en cada
+            actualización: úsala para guías de terceros que cambian solas. Se
+            comprueba al añadirla, así que una URL que no sirve no queda guardada.
           </p>
-          <p class="hint tight static-only">
-            El sitio es estático, así que el perfil se define en el repo: pega
-            este bloque en <code>config/profiles.yaml</code> y el siguiente
-            build publica su enlace.
-          </p>
-        </label>
 
-        <div class="field" id="yaml-box" hidden>
-          <span>Pega esto en <code>config/profiles.yaml</code></span>
-          <pre id="yaml-out" class="yaml"></pre>
+          <div class="feed-add">
+            <input type="url" id="feed-url" placeholder="https://ejemplo.com/guia.xml.gz" spellcheck="false">
+            <input type="text" id="feed-label" placeholder="Nombre (opcional)">
+            <button type="button" id="btn-add-feed">Añadir</button>
+          </div>
+
+          <div id="feeds" class="uploads"></div>
         </div>
-
-        <div class="field">
-          <span class="server-only">Tus enlaces</span>
-          <span class="static-only">Enlaces publicados</span>
-          <div id="profiles" class="profiles"></div>
-        </div>
-
-        <div class="field server-only">
-          <span>Guía completa, sin selección</span>
-          <div class="links-row" id="all-links"></div>
-        </div>
-      </div>
-
-      <div class="panel-head server-only">
-        <h2>Vista previa</h2>
-      </div>
-      <div id="preview" class="preview server-only">
-        <p class="hint">Selecciona un canal para ver su programación y de qué fuente salió cada dato.</p>
-      </div>
-    </section>
+      </details>
+    </div>
   </main>
 
   <div id="toast" class="toast"></div>
