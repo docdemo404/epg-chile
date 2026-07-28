@@ -144,7 +144,7 @@ function rowToRawChannel(r: Record<string, unknown>): RawChannel {
     name: String(r.name),
     fullName: str(r.full_name),
     number: r.number === null || r.number === undefined ? undefined : Number(r.number),
-    logos: parse<ImageRef[]>(r.logos_json, []),
+    logos: dropFallbackImages(parse<ImageRef[]>(r.logos_json, [])),
     isHD: Number(r.is_hd) === 1,
   };
 }
@@ -167,7 +167,7 @@ function rowToRawProgramme(r: Record<string, unknown>): RawProgramme {
     subTitle: str(r.sub_title),
     desc: str(r.desc),
     categories: parse<string[]>(r.categories_json, []),
-    images: parse<ImageRef[]>(r.images_json, []),
+    images: dropFallbackImages(parse<ImageRef[]>(r.images_json, [])),
     credits: r.credits_json ? parse<Credits | undefined>(r.credits_json, undefined) : undefined,
     rating: str(r.rating),
     episode: r.episode_json ? parse<EpisodeRef | undefined>(r.episode_json, undefined) : undefined,

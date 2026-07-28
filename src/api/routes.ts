@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { DateTime } from 'luxon';
 import { loadAliases, loadConfig, saveAliases, type AliasEntry } from '../core/config.ts';
 import { slugify } from '../core/normalize.ts';
+import { guideEtag } from '../core/version.ts';
 import { defaultRange, ingestSource, rebuildChannels, rebuildMerge } from '../core/pipeline.ts';
 import { getJobState, isRunning, startRefresh } from '../core/jobs.ts';
 import { isEphemeral } from '../db/client.ts';
@@ -299,7 +300,16 @@ export function registerApiRoutes(app: FastifyInstance): void {
     // ETag antes de generar nada: los reproductores consultan el enlace cada
     // pocos minutos y casi siempre la guía no ha cambiado. Contestar 304 evita
     // el export entero y manda cero bytes de cuerpo.
-    const etag = `"${slug}.${format}.${await getGuideVersion()}${profileVersion}"`;
+    //
+    // Lleva la versión del código además de la de los datos: un despliegue
+    // puede cambiar lo que se emite sin que haya nueva fusión, y sin esto el
+    // 304 dejaba a todos los clientes con la copia anterior. Ver `version.ts`.
+    const etag = guideEtag({
+      slug,
+      format,
+      guideVersion: await getGuideVersion(),
+      profileVersion,
+    });
     reply.header('ETag', etag);
     if (req.headers['if-none-match'] === etag) return reply.code(304).send();
 

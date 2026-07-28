@@ -28,6 +28,16 @@ const root = join(here, '..');
 const out = join(root, '.vercel', 'output');
 const fn = join(out, 'functions', 'index.func');
 
+/**
+ * Identidad del build, que viaja dentro del bundle y acaba en el ETag de los
+ * enlaces permanentes (ver `src/core/version.ts`).
+ *
+ * Se usa la hora de construcción y no el commit: se despliega con `--prebuilt`
+ * desde el working tree, así que un cambio sin commitear también cambia lo que
+ * se sirve. Lo que debe moverse en cada build es esto.
+ */
+const buildId = Date.now().toString(36);
+
 rmSync(out, { recursive: true, force: true });
 mkdirSync(fn, { recursive: true });
 
@@ -46,6 +56,9 @@ await build({
   // es JS puro y habla exactamente el protocolo de Turso, que es la única base
   // que se usa en Vercel: se sustituye uno por otro al empaquetar.
   alias: { '@libsql/client': '@libsql/client/web' },
+  // Sin marca de build el ETag solo dependería de los datos, y un despliegue
+  // que cambie lo emitido sin nueva fusión no invalidaría ninguna caché.
+  define: { 'process.env.BUILD_ID': JSON.stringify(buildId) },
   // `@vercel/blob` va DENTRO del bundle. Estuvo marcado como external, y eso
   // funcionaba solo porque sin BLOB_READ_WRITE_TOKEN el código que lo importa
   // nunca llegaba a ejecutarse. Al configurar Blob, toda la API de subidas
@@ -104,4 +117,4 @@ writeFileSync(
   ),
 );
 
-console.log('Build Output listo en .vercel/output');
+console.log(`Build Output listo en .vercel/output (build ${buildId})`);
