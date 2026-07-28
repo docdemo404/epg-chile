@@ -116,9 +116,10 @@ export async function batch(
   statements: { sql: string; args: InValue[] }[],
 ): Promise<void> {
   if (!statements.length) return;
-  // libSQL limita el tamaño del lote; 500 va holgado y mantiene el número de
-  // viajes bajo.
-  const CHUNK = 500;
+  // Medido contra Turso: 200 sentencias por lote tardan ~3 s, pero 1.000
+  // tardan 238 s y a veces cortan la conexión. El servidor degrada de forma
+  // no lineal con el tamaño del lote, así que conviene quedarse pequeño.
+  const CHUNK = isRemote() ? 200 : 500;
   for (let i = 0; i < statements.length; i += CHUNK) {
     await getClient().batch(statements.slice(i, i + CHUNK), 'write');
   }
@@ -139,6 +140,16 @@ export async function atomic(
   statements: { sql: string; args: InValue[] }[],
 ): Promise<void> {
   if (!statements.length) return;
+
+  // Contra Turso por HTTP las transacciones interactivas devuelven 404: ese
+  // modo necesita websocket. Se usa `batch`, que el servidor ya ejecuta como
+  // una transacción, aunque al trocear se pierda la atomicidad entre lotes.
+  // Es el precio de que funcione; en local sí se obtiene atomicidad completa.
+  if (isRemote()) {
+    await batch(statements);
+    return;
+  }
+
   const tx = await getClient().transaction('write');
   try {
     for (const s of statements) {
