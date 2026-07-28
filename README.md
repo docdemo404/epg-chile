@@ -69,12 +69,35 @@ y `BLOB_READ_WRITE_TOKEN` (esta última la crea Vercel al añadir un store Blob)
 **3. Los mismos valores como secrets del repo**, para que Actions escriba en la
 misma base: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`.
 
-**4. Desplegar.** `vercel.json` reescribe todas las rutas a `api/index.ts`, que
-envuelve la misma app Fastify que usas en local — no hay dos versiones que
-puedan divergir.
+**4. Desplegar:**
+
+```bash
+vercel deploy --prod --prebuilt --archive=tgz
+```
 
 Sin `TURSO_DATABASE_URL` el proyecto cae a un archivo SQLite local, que es lo
-que quieres en desarrollo y lo que usa el contenedor Docker.
+que quieres en desarrollo y lo que usa el contenedor Docker. En Vercel, en
+cambio, arranca igual pero el panel muestra un aviso con lo que falta: una
+guía vacía por falta de configuración no debe parecer un fallo del agregador.
+
+### Detalles del despliegue que costaron encontrar
+
+Están resueltos en `scripts/build-vercel.mjs`, pero conviene saber por qué:
+
+- **El builder de Vercel no sirve aquí.** Transpila `api/index.ts` pero deja
+  intactos los especificadores `../src/app.ts` y no arrastra `src/`, así que
+  cada petición moría con `ERR_MODULE_NOT_FOUND`. Se empaqueta con esbuild.
+- **`functions` se valida antes del build**, así que no se puede declarar un
+  archivo que genera el propio build. Por eso se emite directamente
+  `.vercel/output` con el Build Output API.
+- **El cliente Node de libSQL no vale**: carga un binario nativo por
+  plataforma y el bundle se construye en una máquina distinta de la que lo
+  ejecuta. Se sustituye por `@libsql/client/web`, que es JS puro y habla el
+  protocolo de Turso.
+- **El bundle se minifica** porque la API de subida de Vercel rechazaba los
+  4,5 MB sin minificar con un error interno.
+- **`--archive=tgz`** evita el mismo fallo de subida: manda un único tarball
+  en vez de archivo por archivo.
 
 ### Alternativa sin servidor
 
