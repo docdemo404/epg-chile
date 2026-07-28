@@ -1,0 +1,17 @@
+# Vercel no lee .gitignore: sin esto sube la base (88 MB), los exports y el
+# sitio estático, y el despliegue revienta por tamaño.
+node_modules
+data
+exports
+cache
+dist-site
+dist
+.git
+.github
+test
+Dockerfile
+docker-compose.yml
+*.log
+
+# El bundle es api/index.js; las fuentes TS no hacen falta en la función.
+api/index.ts

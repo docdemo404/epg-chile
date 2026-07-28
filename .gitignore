@@ -11,3 +11,6 @@ prueba-upload.xml.gz
 mi-guia.xml
 
 .vercel
+api/index.js
+api/panel/
+.vercel-build/

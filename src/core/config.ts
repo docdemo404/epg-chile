@@ -4,7 +4,28 @@ import { dirname, join } from 'node:path';
 import YAML from 'yaml';
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const ROOT = join(here, '..', '..');
+
+/**
+ * Localiza la raíz del proyecto.
+ *
+ * No basta con subir dos niveles desde este archivo: al empaquetar para
+ * Vercel todo el código colapsa en `api/index.js`, y esa ruta relativa
+ * apuntaría fuera del proyecto. Se prueban los candidatos y gana el primero
+ * que realmente contenga la configuración.
+ */
+function findRoot(): string {
+  const candidates = [
+    join(here, '..', '..'), // src/core/config.ts en desarrollo
+    process.cwd(), // raíz del bundle en Vercel (/var/task)
+    join(here, '..'), // api/index.js empaquetado
+  ];
+  for (const c of candidates) {
+    if (existsSync(join(c, 'config', 'sources.yaml'))) return c;
+  }
+  return candidates[0]!;
+}
+
+export const ROOT = findRoot();
 export const CONFIG_DIR = join(ROOT, 'config');
 export const DATA_DIR = process.env.EPG_DATA_DIR ?? join(ROOT, 'data');
 export const EXPORT_DIR = process.env.EPG_EXPORT_DIR ?? join(ROOT, 'exports');

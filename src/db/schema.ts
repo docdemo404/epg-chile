@@ -1,9 +1,16 @@
--- Esquema de la guía EPG.
---
--- Se conserva siempre la capa cruda (raw_*) además de la fusionada. Eso
--- permite re-fusionar con otra prioridad sin volver a golpear las fuentes, y
--- es la herramienta de diagnóstico cuando una fuente cambia de formato.
-
+/**
+ * Esquema de la guía EPG.
+ *
+ * Va como constante y no como archivo `.sql` suelto a propósito: al empaquetar
+ * para Vercel todo el código colapsa en un único bundle, y un `readFileSync`
+ * relativo dejaba de encontrar el archivo. Como constante viaja siempre con el
+ * código.
+ *
+ * Se conserva la capa cruda (`raw_*`) además de la fusionada: permite
+ * re-fusionar con otra prioridad sin volver a golpear las fuentes, y es la
+ * herramienta de diagnóstico cuando una fuente cambia de formato.
+ */
+export const SCHEMA_SQL = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -19,9 +26,8 @@ CREATE TABLE IF NOT EXISTS sources (
   programme_count INTEGER DEFAULT 0
 );
 
--- Canales tal como los entrega cada fuente, sin unificar.
 CREATE TABLE IF NOT EXISTS raw_channels (
-  source_id         TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  source_id         TEXT NOT NULL,
   source_channel_id TEXT NOT NULL,
   name              TEXT NOT NULL,
   full_name         TEXT,
@@ -33,10 +39,9 @@ CREATE TABLE IF NOT EXISTS raw_channels (
   PRIMARY KEY (source_id, source_channel_id)
 );
 
--- Emisiones tal como las entrega cada fuente. `start`/`stop` en epoch ms UTC.
 CREATE TABLE IF NOT EXISTS raw_programmes (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  source_id         TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  source_id         TEXT NOT NULL,
   source_channel_id TEXT NOT NULL,
   start             INTEGER NOT NULL,
   stop              INTEGER NOT NULL,
@@ -60,7 +65,6 @@ CREATE INDEX IF NOT EXISTS idx_raw_prog_lookup
 CREATE INDEX IF NOT EXISTS idx_raw_prog_window
   ON raw_programmes (start, stop);
 
--- Canales unificados.
 CREATE TABLE IF NOT EXISTS channels (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   xmltv_id       TEXT NOT NULL UNIQUE,
@@ -70,12 +74,9 @@ CREATE TABLE IF NOT EXISTS channels (
   updated_at     INTEGER NOT NULL
 );
 
--- Vínculo entre un canal unificado y su representación en cada fuente.
--- `manual = 1` marca los que vienen de channel-aliases.yaml: el emparejado
--- automático nunca los pisa.
 CREATE TABLE IF NOT EXISTS channel_links (
-  channel_id        INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-  source_id         TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  channel_id        INTEGER NOT NULL,
+  source_id         TEXT NOT NULL,
   source_channel_id TEXT NOT NULL,
   number            INTEGER,
   confidence        REAL NOT NULL DEFAULT 1.0,
@@ -85,10 +86,9 @@ CREATE TABLE IF NOT EXISTS channel_links (
 
 CREATE INDEX IF NOT EXISTS idx_channel_links_channel ON channel_links (channel_id);
 
--- Programas fusionados, listos para exportar.
 CREATE TABLE IF NOT EXISTS programmes (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  channel_id        INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  channel_id        INTEGER NOT NULL,
   start             INTEGER NOT NULL,
   stop              INTEGER NOT NULL,
   title             TEXT NOT NULL,
@@ -110,7 +110,6 @@ CREATE TABLE IF NOT EXISTS programmes (
 CREATE INDEX IF NOT EXISTS idx_programmes_window ON programmes (start, stop);
 CREATE INDEX IF NOT EXISTS idx_programmes_channel ON programmes (channel_id, start);
 
--- Perfiles de exportación guardados desde el panel.
 CREATE TABLE IF NOT EXISTS profiles (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   name        TEXT NOT NULL UNIQUE,
@@ -121,11 +120,10 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at  INTEGER NOT NULL
 );
 
--- Diccionario de PIDs de Movistar (PER=persona, GEN=género, AGE=rating).
--- Se resuelven una vez y se reusan: son estables y ahorran miles de requests.
 CREATE TABLE IF NOT EXISTS ca_dictionary (
   pid        TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,
   title      TEXT NOT NULL,
   fetched_at INTEGER NOT NULL
 );
+`;

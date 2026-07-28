@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-vercel.mjs",
     "dev": "node --experimental-strip-types --watch src/server.ts",
     "start": "node --experimental-strip-types src/server.ts",
     "fetch": "node --experimental-strip-types src/cli/fetch.ts",
@@ -16,7 +16,8 @@
     "merge": "node --experimental-strip-types src/cli/merge.ts",
     "export": "node --experimental-strip-types src/cli/export.ts",
     "test": "node --experimental-strip-types --test test/normalize.test.ts test/merge.test.ts test/xmltv.test.ts test/channel-match.test.ts",
-    "build:site": "node --experimental-strip-types src/cli/build-site.ts"
+    "build:site": "node --experimental-strip-types src/cli/build-site.ts",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.0",
@@ -33,6 +34,7 @@
     "@types/luxon": "^3.4.2",
     "@types/node": "^22.10.2",
     "@types/node-cron": "^3.0.11",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.2"
   }
 }

@@ -1,8 +1,8 @@
 import { createClient, type Client, type InValue } from '@libsql/client';
-import { mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { DATA_DIR } from '../core/config.ts';
+import { SCHEMA_SQL } from './schema.ts';
 
 /**
  * Conexión a la base.
@@ -15,8 +15,6 @@ import { DATA_DIR } from '../core/config.ts';
  * A cambio, toda la capa de datos es asíncrona: el cliente remoto habla por
  * red y no hay forma de fingir sincronía.
  */
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 let client: Client | null = null;
 let schemaReady: Promise<void> | null = null;
@@ -66,8 +64,7 @@ export function isRemote(): boolean {
 export function ensureSchema(): Promise<void> {
   if (schemaReady) return schemaReady;
   schemaReady = (async () => {
-    const sql = readFileSync(join(here, 'schema.sql'), 'utf8');
-    const statements = sql
+    const statements = SCHEMA_SQL
       .split(';')
       .map((s) => s.trim())
       .filter(Boolean)
