@@ -1,0 +1,88 @@
+name: Desplegar en Vercel
+
+# Despliegue continuo: cada push a main publica en producción.
+#
+# Se construye AQUÍ y se sube con `--prebuilt` en vez de dejar que Vercel
+# compile. Es el mismo motivo por el que existe scripts/build-vercel.mjs: el
+# builder de Vercel no arrastra `src/` al transpilar api/index.ts, así que el
+# despliegue se emite con el Build Output API desde una máquina que sí tiene
+# el repo entero.
+#
+# Requisitos (una vez):
+#   - Secret VERCEL_TOKEN  → vercel.com/account/tokens
+#   - Secret VERCEL_ORG_ID y VERCEL_PROJECT_ID → están en .vercel/project.json
+
+on:
+  push:
+    branches: [main]
+    # Cambios que no afectan a lo que se sirve no merecen un despliegue.
+    paths-ignore:
+      - 'README.md'
+      - '.github/workflows/epg.yml'
+  workflow_dispatch:
+
+concurrency:
+  # Dos despliegues a la vez publicarían en orden impredecible.
+  group: deploy-produccion
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      # Sin el token no se puede desplegar, pero fallar en cada push mientras
+      # no esté configurado solo genera ruido. Se avisa y se sale limpio.
+      - name: Comprobar que hay token
+        id: guard
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+            echo "listo=no" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Despliegue omitido"
+              echo ""
+              echo 'Falta el secret `VERCEL_TOKEN`. Créalo en'
+              echo '<https://vercel.com/account/tokens> y añádelo en'
+              echo 'Settings → Secrets and variables → Actions.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "listo=si" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.guard.outputs.listo == 'si'
+
+      - uses: actions/setup-node@v7
+        if: steps.guard.outputs.listo == 'si'
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        if: steps.guard.outputs.listo == 'si'
+        run: npm ci
+
+      # Si esto falla, el despliegue no debe salir: es la red de seguridad que
+      # justifica desplegar sin intervención.
+      - name: Comprobar tipos
+        if: steps.guard.outputs.listo == 'si'
+        run: npm run typecheck
+
+      - name: Pruebas
+        if: steps.guard.outputs.listo == 'si'
+        run: npm test
+
+      - name: Construir el Build Output
+        if: steps.guard.outputs.listo == 'si'
+        run: npm run build
+
+      - name: Publicar en producción
+        if: steps.guard.outputs.listo == 'si'
+        run: |
+          npx vercel deploy --prod --prebuilt --archive=tgz --yes \
+            --token="${{ secrets.VERCEL_TOKEN }}"

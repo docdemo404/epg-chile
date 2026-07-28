@@ -14,6 +14,8 @@ const state = {
    */
   static: false,
   data: null,
+  /** Perfil que se está editando, o null si se está creando uno nuevo. */
+  editing: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -184,6 +186,72 @@ function toggle(id) {
 
 function updateSelectedCounter() {
   $('#selected-counter').textContent = `${state.selected.size} seleccionados`;
+  renderEditingBar();
+}
+
+// ------------------------------------------------- edición de enlaces
+
+/**
+ * Edita un enlace ya publicado.
+ *
+ * Se reutiliza la misma selección de canales que sirve para crear: entrar en
+ * modo edición es cargar los canales del perfil y recordar a cuál pertenecen.
+ * Al guardar se manda un PATCH, que cambia los canales sin tocar el slug: la
+ * URL que ya está pegada en el reproductor no puede cambiar.
+ */
+function startEditing(profile) {
+  state.editing = { slug: profile.slug, name: profile.name };
+  state.selected = new Set(profile.channelIds);
+  renderChannels();
+  toast(`Editando "${profile.name}" — cambia los canales y guarda`);
+  $('#editing-bar')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function stopEditing() {
+  state.editing = null;
+  state.selected.clear();
+  renderChannels();
+}
+
+function renderEditingBar() {
+  const bar = $('#editing-bar');
+  if (!bar) return;
+  const create = $('#create-box');
+  if (!state.editing) {
+    bar.hidden = true;
+    if (create) create.hidden = false;
+    return;
+  }
+  bar.hidden = false;
+  // Crear y editar a la vez confundiría sobre qué hace el botón.
+  if (create) create.hidden = true;
+  $('#editing-name').textContent = `«${state.editing.name}»`;
+  $('#editing-count').textContent = `${state.selected.size} canales`;
+}
+
+async function saveEdit() {
+  if (!state.editing) return;
+  if (!state.selected.size) return toast('Deja al menos un canal', true);
+
+  const btn = $('#btn-save-edit');
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  try {
+    const p = await api(`/api/profiles/${encodeURIComponent(state.editing.slug)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ channelIds: [...state.selected] }),
+    });
+    toast(`"${p.name}" actualizado: ${p.channelIds.length} canales`);
+    state.editing = null;
+    state.selected.clear();
+    await loadProfiles();
+    renderChannels();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Guardar cambios';
+  }
 }
 
 // ------------------------------------------------------------ vista previa
@@ -305,12 +373,8 @@ async function loadProfiles() {
     const head = document.createElement('div');
     head.className = 'phead';
     head.innerHTML = `<div class="pname">${p.name} <span class="tag">${p.channelIds.length} canales</span></div>`;
-    head.title = 'Cargar esta selección de canales';
-    head.addEventListener('click', () => {
-      state.selected = new Set(p.channelIds);
-      renderChannels();
-      toast(`Cargada la selección de "${p.name}"`);
-    });
+    head.title = 'Editar los canales de este enlace';
+    head.addEventListener('click', () => startEditing(p));
 
     const del = document.createElement('button');
     del.className = 'del';
@@ -664,6 +728,9 @@ $('#btn-save-profile').addEventListener('click', createLink);
 $('#profile-name').addEventListener('keydown', (ev) => {
   if (ev.key === 'Enter') createLink();
 });
+
+$('#btn-save-edit')?.addEventListener('click', saveEdit);
+$('#btn-cancel-edit')?.addEventListener('click', stopEditing);
 
 $('#btn-rebuild').addEventListener('click', async (ev) => {
   const btn = ev.currentTarget;

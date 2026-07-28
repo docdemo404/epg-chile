@@ -426,6 +426,27 @@ export interface CoverageStats {
 }
 
 /** Cobertura de metadatos agregada en SQL, sin materializar la guía entera. */
+/**
+ * Sello de versión de la guía fusionada, para construir el ETag.
+ *
+ * Es una sola agregación sobre una columna, frente a los segundos que cuesta
+ * materializar el XMLTV completo. Permite contestar 304 a un cliente que ya
+ * tiene la guía al día sin generar nada: los reproductores consultan el enlace
+ * permanente cada pocos minutos y casi siempre no ha cambiado nada.
+ *
+ * `merged_at` sirve porque `rebuildMerge` reescribe la ventana entera con la
+ * misma marca: cualquier cambio en la guía la mueve.
+ */
+export async function getGuideVersion(): Promise<string> {
+  await initDb();
+  const row = await get<{ v: number | null; n: number }>(
+    'SELECT MAX(merged_at) AS v, COUNT(*) AS n FROM programmes',
+  );
+  // El recuento acompaña a la marca para que un borrado que no cambie el
+  // máximo —quitar emisiones del final de la ventana— también mueva el ETag.
+  return `${row?.v ?? 0}-${row?.n ?? 0}`;
+}
+
 export async function getCoverageStats(from: number, to: number): Promise<CoverageStats> {
   await initDb();
   const row = await get(
@@ -542,6 +563,8 @@ export interface Profile {
   slug: string;
   channelIds: number[];
   options: Record<string, unknown>;
+  /** Sirve para el ETag: al editar los canales, el enlace debe dejar de validar. */
+  updatedAt: number;
 }
 
 function rowToProfile(r: Record<string, unknown>): Profile {
@@ -551,6 +574,7 @@ function rowToProfile(r: Record<string, unknown>): Profile {
     slug: String(r.slug),
     channelIds: parse<number[]>(r.channels_json, []),
     options: parse<Record<string, unknown>>(r.options_json, {}),
+    updatedAt: Number(r.updated_at ?? 0),
   };
 }
 
@@ -582,6 +606,39 @@ export async function saveProfile(
     [name, slug, json(channelIds), json(options), now, now],
   );
   return (await getProfileBySlug(slug))!;
+}
+
+/**
+ * Cambia los canales de un enlace ya publicado, dejando intacto el slug.
+ *
+ * Va aparte de `saveProfile` justamente por eso: el slug sale del nombre, así
+ * que reguardar por nombre para editar la lista arriesga cambiar la URL y
+ * romper el enlace que ya está pegado en el reproductor. Aquí el nombre y el
+ * slug no se tocan.
+ */
+export async function updateProfileChannels(
+  slug: string,
+  channelIds: number[],
+): Promise<Profile | null> {
+  await initDb();
+  const res = await run(
+    'UPDATE profiles SET channels_json = ?, updated_at = ? WHERE slug = ?',
+    [json(channelIds), Date.now(), slug],
+  );
+  if (!res.changes) return null;
+  return await getProfileBySlug(slug);
+}
+
+/** Renombra un enlace conservando su slug, para no romper la URL publicada. */
+export async function renameProfile(slug: string, name: string): Promise<Profile | null> {
+  await initDb();
+  const res = await run('UPDATE profiles SET name = ?, updated_at = ? WHERE slug = ?', [
+    name,
+    Date.now(),
+    slug,
+  ]);
+  if (!res.changes) return null;
+  return await getProfileBySlug(slug);
 }
 
 export async function deleteProfile(slug: string): Promise<boolean> {

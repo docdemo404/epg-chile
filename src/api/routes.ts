@@ -16,14 +16,17 @@ import {
   getChannels,
   getCoverageStats,
   getFeedUrl,
+  getGuideVersion,
   getMergedProgrammes,
   getProfileBySlug,
   getRawChannels,
   getSourceStatuses,
   listFeedUrls,
   listProfiles,
+  renameProfile,
   saveProfile,
   setFeedUrlEnabled,
+  updateProfileChannels,
 } from '../db/repo.ts';
 
 const FORMATS: ExportFormat[] = ['json', 'xml', 'xml.gz'];
@@ -168,6 +171,39 @@ export function registerApiRoutes(app: FastifyInstance): void {
     return await saveProfile(name, slugify(name), ids, body.options ?? {});
   });
 
+  /**
+   * Edita un enlace ya publicado: cambia sus canales, su nombre, o ambos.
+   *
+   * El slug NO se recalcula aunque cambie el nombre. Es deliberado: la URL ya
+   * está pegada en el reproductor de quien lo usa, y una edición no puede
+   * romperla. Un enlace cuyo nombre y slug divergen es preferible a un enlace
+   * muerto; para tener otra URL se crea otro perfil.
+   */
+  app.patch('/api/profiles/:slug', async (req, reply) => {
+    const { slug } = req.params as { slug: string };
+    const body = (req.body ?? {}) as { name?: unknown; channelIds?: unknown };
+
+    const quiereCanales = Array.isArray(body.channelIds);
+    const nombre = typeof body.name === 'string' ? body.name.trim() : undefined;
+    if (!quiereCanales && !nombre) {
+      return reply.code(400).send({ error: 'Manda `channelIds`, `name` o ambos' });
+    }
+
+    let profile = await getProfileBySlug(slug);
+    if (!profile) return reply.code(404).send({ error: 'Perfil no encontrado' });
+
+    if (quiereCanales) {
+      const ids = (body.channelIds as unknown[])
+        .map(Number)
+        .filter((n) => Number.isInteger(n));
+      if (!ids.length) return reply.code(400).send({ error: 'Selecciona al menos un canal' });
+      profile = await updateProfileChannels(slug, ids);
+    }
+    if (nombre) profile = await renameProfile(slug, nombre);
+
+    return profile;
+  });
+
   app.delete('/api/profiles/:slug', async (req, reply) => {
     const { slug } = req.params as { slug: string };
     if (!(await deleteProfile(slug))) return reply.code(404).send({ error: 'Perfil no encontrado' });
@@ -213,17 +249,62 @@ export function registerApiRoutes(app: FastifyInstance): void {
 
     // "all" exporta la guía completa sin necesidad de crear un perfil.
     let channelIds: number[] | undefined;
+    let profileVersion = '';
     if (slug !== 'all') {
       const profile = await getProfileBySlug(slug);
       if (!profile) return reply.code(404).send({ error: `No existe el perfil "${slug}"` });
       channelIds = profile.channelIds;
+      // Entra en el ETag: sin esto, editar los canales de un enlace no
+      // invalidaría nada y el reproductor seguiría recibiendo la lista vieja.
+      profileVersion = `.${profile.updatedAt}`;
     }
 
+    /*
+     * Caché en el CDN, que es de donde sale casi toda la velocidad.
+     *
+     * Antes se mandaba `public, max-age=900`, que solo habla con el navegador:
+     * el CDN de Vercel obedece `s-maxage`, así que cada petición llegaba a la
+     * función y pagaba los ~7 s de materializar el XMLTV. `X-Vercel-Cache` era
+     * MISS siempre.
+     *
+     * `stale-while-revalidate` es lo que quita el pico: pasados los 15 min el
+     * CDN entrega igual la copia vieja al instante y refresca por detrás, así
+     * que nadie vuelve a esperar la generación. A cambio, un cliente puede ver
+     * una guía hasta unos minutos vieja; para una parrilla que se reconstruye
+     * cada 6 horas y cubre varios días, es intrascendente.
+     */
+    /*
+     * Dos políticas, porque los dos casos no se parecen.
+     *
+     * `all` es la guía entera: 2,5 MB comprimidos que cuestan ~7 s de
+     * generar y que solo cambian con una ingesta, cada 6 h. Se cachea holgado
+     * y con `stale-while-revalidate`, que es lo que evita que nadie vuelva a
+     * esperar esos 7 s.
+     *
+     * Un perfil es un subconjunto pequeño, barato de generar, y lo edita una
+     * persona que quiere ver el resultado. Aquí `stale-while-revalidate`
+     * estorba: haría que la primera petición tras vencer el plazo siguiera
+     * devolviendo la lista vieja. Sin él, pasados 60 s se regenera y el cambio
+     * aparece. El coste es despreciable y a cambio editar un enlace se
+     * comporta como uno espera.
+     */
+    const esGuiaCompleta = slug === 'all';
+    reply.header(
+      'Cache-Control',
+      esGuiaCompleta
+        ? 'public, max-age=300, s-maxage=900, stale-while-revalidate=86400'
+        : 'public, max-age=30, s-maxage=60',
+    );
+
+    // ETag antes de generar nada: los reproductores consultan el enlace cada
+    // pocos minutos y casi siempre la guía no ha cambiado. Contestar 304 evita
+    // el export entero y manda cero bytes de cuerpo.
+    const etag = `"${slug}.${format}.${await getGuideVersion()}${profileVersion}"`;
+    reply.header('ETag', etag);
+    if (req.headers['if-none-match'] === etag) return reply.code(304).send();
+
     const result = await generateExport(format as ExportFormat, { channelIds });
-    return reply
-      .header('Content-Type', result.contentType)
-      .header('Cache-Control', 'public, max-age=900')
-      .send(result.body);
+    return reply.header('Content-Type', result.contentType).send(result.body);
   });
 
   // ----------------------------------------------------------------- alias

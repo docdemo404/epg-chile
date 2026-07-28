@@ -102,7 +102,22 @@
       </div>
 
       <div class="export-box">
-        <label class="field">
+        <div class="editing server-only" id="editing-bar" hidden>
+          <div class="einfo">
+            Editando <strong id="editing-name"></strong>
+            <span class="tag" id="editing-count"></span>
+            <div class="hint tight">
+              Cambia la selección de canales y guarda. La URL no cambia, así que
+              lo que ya tengas pegado en el reproductor sigue sirviendo.
+            </div>
+          </div>
+          <div class="row">
+            <button class="btn primary" id="btn-save-edit">Guardar cambios</button>
+            <button class="btn" id="btn-cancel-edit">Cancelar</button>
+          </div>
+        </div>
+
+        <label class="field" id="create-box">
           <span class="server-only">Crear un enlace con los canales seleccionados</span>
           <span class="static-only">Generar un perfil nuevo</span>
           <div class="row">

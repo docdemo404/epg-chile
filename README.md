@@ -86,6 +86,30 @@ misma base: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`.
 vercel deploy --prod --prebuilt --archive=tgz
 ```
 
+### Despliegue continuo
+
+`.github/workflows/deploy.yml` publica en producción con cada push a `main`,
+después de pasar `typecheck` y las pruebas: si algo de eso falla, no se
+despliega.
+
+Construye en el runner y sube con `--prebuilt` en vez de dejar compilar a
+Vercel, por el mismo motivo que existe `scripts/build-vercel.mjs` (ver más
+abajo). Necesita tres secrets; `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` salen de
+`.vercel/project.json`, y el token se crea en
+<https://vercel.com/account/tokens>:
+
+```
+VERCEL_TOKEN · VERCEL_ORG_ID · VERCEL_PROJECT_ID
+```
+
+Mientras falte `VERCEL_TOKEN` el workflow no falla: se salta el despliegue y
+deja la explicación en el resumen de la ejecución.
+
+La alternativa es conectar el repositorio desde el panel de Vercel, que evita
+tener que gestionar un token. Requiere añadir GitHub como método de acceso a
+la cuenta de Vercel, y a cambio Vercel compila por su cuenta ejecutando el
+`buildCommand` de `vercel.json`.
+
 Sin `TURSO_DATABASE_URL` el proyecto cae a un archivo SQLite local, que es lo
 que quieres en desarrollo y lo que usa el contenedor Docker. En Vercel, en
 cambio, arranca igual pero el panel muestra un aviso con lo que falta: una
@@ -132,6 +156,41 @@ http://localhost:3000/epg/all.xml.gz      ← guía completa, sin crear nada
 
 Los ids de canal se conservan entre recálculos, así que un enlace creado hoy
 sigue sirviendo los mismos canales después de cada actualización.
+
+### Editar un enlace publicado
+
+Al pulsar un enlace en el panel se cargan sus canales y se entra en modo
+edición: se añaden o quitan los que haga falta y se guarda. **El slug no se
+recalcula**, ni siquiera al renombrar, porque la URL ya está pegada en el
+reproductor de quien la usa y una edición no puede romperla. Un enlace cuyo
+nombre y slug diverjan es preferible a un enlace muerto; para tener otra URL
+se crea otro perfil.
+
+El cambio tarda hasta un minuto en verse a través del CDN (ver abajo).
+
+### Velocidad: caché en el CDN
+
+Los enlaces permanentes se cachean en el borde de Vercel, que es de donde sale
+casi toda la velocidad. Antes se mandaba `public, max-age=900`, que solo habla
+con el navegador: el CDN obedece `s-maxage`, así que **cada petición llegaba a
+la función y pagaba los ~7 s de materializar el XMLTV**, con `X-Vercel-Cache`
+en MISS siempre.
+
+Hay dos políticas porque los dos casos no se parecen:
+
+| | `s-maxage` | `stale-while-revalidate` | Por qué |
+|---|---|---|---|
+| `/epg/all.*` | 900 s | 86 400 s | 2,5 MB que cuestan ~7 s de generar y solo cambian con una ingesta, cada 6 h. El SWR evita que nadie vuelva a esperar |
+| `/epg/{perfil}.*` | 60 s | — | Subconjunto pequeño y barato. Aquí el SWR estorba: haría que la primera petición tras vencer el plazo siguiera dando la lista vieja tras editar |
+
+Además se manda un **ETag** derivado de la versión de la guía y, en los
+perfiles, de su fecha de edición. Se calcula con una sola agregación, antes de
+generar nada, así que un reproductor que ya está al día recibe un **304 sin
+cuerpo** en vez de un export completo.
+
+Medido contra producción desde Chile: `all.xml.gz` pasó de **7,0 s a 0,73 s**
+cacheado, y a **0,52 s con 0 bytes** cuando el cliente manda `If-None-Match`.
+De esos 0,5 s, unos 0,39 son handshake y latencia de ida y vuelta.
 
 ## Cómo funciona la fusión
 
@@ -273,6 +332,8 @@ npm test
 | `GET /api/sources` | Estado y última ejecución de cada fuente |
 | `GET /api/stats` | Cobertura de metadatos |
 | `POST /api/profiles` | Crear un enlace permanente |
+| `PATCH /api/profiles/{slug}` | Editar canales o nombre sin cambiar la URL |
+| `DELETE /api/profiles/{slug}` | Eliminar un enlace |
 | `POST /api/refresh` | Forzar ingesta (`{"source":"movistar"}` o todas) |
 | `POST /api/rebuild` | Recalcular sin descargar |
 | `GET /api/uploads` · `POST` · `DELETE /api/uploads/{nombre}` | Guías subidas como archivo |

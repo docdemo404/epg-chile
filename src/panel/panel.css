@@ -232,6 +232,20 @@ body {
 }
 .upload .del:hover { color: var(--err); }
 
+/* Barra de edición de un enlace publicado. Se distingue con el color de acento
+   porque mientras está visible el botón de crear desaparece: hay que ver de un
+   vistazo que se está editando algo existente y no creando. */
+.editing {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 11px 13px; margin-bottom: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--accent); border-radius: var(--radius);
+}
+.editing .einfo { min-width: 0; font-size: 14px; }
+.editing .einfo .tag { margin-left: 6px; }
+.editing .row { display: flex; gap: 8px; flex: 0 0 auto; }
+
 /* Alta de guías remotas por URL.
    Ojo con el nombre: `.sub` ya lo usa el subtítulo de la cabecera, y una regla
    suelta con ese nombre le colaba aquí un borde superior y márgenes. */
