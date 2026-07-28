@@ -18,12 +18,13 @@ Ninguna fuente chilena está completa. Medido contra las APIs reales:
 | **mi.tv** | HTML + JSON-LD | 192 | Sinopsis en el 100 %, género, episodio |
 | **Emisoras** (Mega, Canal 13, La Red) | HTML de cada canal | 3 | Parrilla de primera mano: va por delante ante cambios de última hora |
 | ~~Zapping TV~~ | HTML | — | Desactivada: geobloqueo a Chile, ver más abajo |
+| **Parrilla fija** | JSON semanal en una URL | 1 | Canales locales sin EPG en ningún operador: su horario se repite cada semana |
 | **Tivify** (España) | JSON del CDN de TVUP | 303 | Guía española completa. **Aislada**: no se fusiona con las chilenas |
 
 Ninguna sola sirve, pero se complementan. El sistema toma la mejor versión de
 cada dato y deja registrado de dónde salió.
 
-Resultado actual: **569 canales —266 chilenos y 303 españoles—, ~56.800
+Resultado actual: **570 canales —267 chilenos y 303 españoles—, ~56.900
 emisiones, 97 % con sinopsis, 89 % con imagen, cero solapes.**
 
 ## Uso rápido
@@ -251,6 +252,69 @@ Los vínculos manuales viven en `config/channel-aliases.yaml` y tienen prioridad
 absoluta. El panel escribe ahí, así que las correcciones sobreviven a cualquier
 re-ingesta. Nombrar un canal en un alias arrastra sus señales gemelas: Movistar
 publica dos "CANAL 13 SPA" (SD y HD) y ambas pertenecen al mismo canal.
+
+## Canales de parrilla fija
+
+Los canales locales pequeños no salen en ningún operador ni tienen una web que
+scrapear, pero sí publican un **horario semanal que se repite**: todos los
+lunes lo mismo, otro bloque el fin de semana. La fuente `weekly` toma ese
+horario y lo expande a fechas concretas dentro de la ventana de la guía.
+
+La parrilla **vive fuera del repositorio**, en la URL que declara cada canal en
+`config/sources.yaml`, y se vuelve a descargar en cada ingesta. Así el horario
+se corrige editando ese archivo, sin tocar el código ni volver a desplegar.
+
+```yaml
+- id: weekly
+  channels:
+    - id: diferencia-tv
+      name: Diferencia TV
+      fullName: Diferencia Radio TV
+      logo: https://…
+      url: https://…/parrilla.json
+```
+
+El archivo agrupa los bloques por periodo. Solo hace falta la hora de inicio:
+
+```json
+{
+  "canal": "Diferencia TV",
+  "programacion": {
+    "lunes_a_viernes": {
+      "bloques": [
+        { "hora": "08:00", "programa": "Inicio de Transmisiones" },
+        { "hora": "22:00", "programa": "Noche de Películas",
+          "descripcion": "…", "imagen": { "url": "https://…" } }
+      ]
+    },
+    "sabado_y_domingo": { "bloques": [] }
+  }
+}
+```
+
+Cuatro decisiones que conviene conocer:
+
+- **Cada bloque termina donde empieza el siguiente**, aunque el siguiente sea
+  del día de después. Por eso el cierre de transmisiones cubre la madrugada
+  entera hasta el inicio del día siguiente, en vez de dejar un hueco que el
+  reproductor muestra como "sin información".
+- **Una hora que retrocede es la madrugada siguiente.** El bloque de las 00:30
+  que va detrás del de las 23:45 pertenece al día de después; situarlo en el
+  suyo lo adelantaría 24 horas.
+- **El periodo más específico gana.** Si hay un `lunes_a_domingo` y además un
+  `domingo`, el domingo manda ese. Se aceptan las formas en que se escribe una
+  parrilla a mano: `lunes_a_viernes`, `sábado y domingo`, `todos los días`, e
+  incluso rangos que dan la vuelta a la semana (`viernes a lunes`).
+- **Las imágenes se comprueban antes de publicarlas.** En las demás fuentes las
+  URLs salen del CDN del operador; aquí las escribe a mano quien mantiene el
+  archivo. Se verifica cada URL distinta una vez por ingesta —una docena por
+  canal— y la que no responde no entra: una imagen muerta deja al reproductor
+  esperando algo que no va a llegar. Ante un fallo de red se conserva.
+
+`priority` va por detrás de las fuentes con horarios reales a propósito: una
+parrilla fija describe la intención del canal, no lo que se emitió. Si algún
+día un operador publica EPG de uno de estos canales, manda el suyo y la
+parrilla fija se queda rellenando los huecos.
 
 ## Guía de España
 

@@ -164,6 +164,34 @@ sources:
       minDelayMs: 400
     refreshCron: "20 */6 * * *"
 
+  - id: weekly
+    enabled: true
+    # Canales de parrilla FIJA: la misma programación cada semana.
+    #
+    # Los canales locales pequeños no salen en ningún operador ni tienen web
+    # que scrapear, pero sí publican un horario semanal que se repite. Esta
+    # fuente lo expande a fechas concretas dentro de la ventana de la guía.
+    #
+    # `priority` va por detrás de las fuentes con horarios reales a propósito:
+    # una parrilla fija describe la intención del canal, no lo que se emitió.
+    # Si algún día un operador trae uno de estos canales, que mande su EPG y
+    # que la parrilla fija se quede rellenando los huecos.
+    priority: 5
+    # No hay host común: cada canal declara la URL de su parrilla.
+    baseUrl: ""
+    channels:
+      - id: diferencia-tv
+        name: Diferencia TV
+        fullName: Diferencia Radio TV
+        logo: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRrIcYWOMKeKkDhpwrMtexgfphxmiGkn2yEMTxC0YtjMA&s=10"
+        # El horario vive fuera del repo: se vuelve a descargar en cada
+        # ingesta, así que editarlo ahí basta para cambiar la guía.
+        url: https://snippet.host/ohhpkx/raw
+    rateLimit:
+      concurrency: 1
+      minDelayMs: 500
+    refreshCron: "15 */12 * * *"
+
   - id: tivify
     enabled: true
     # AISLADA: son canales de ESPAÑA, no de Chile.
