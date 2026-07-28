@@ -12,14 +12,14 @@ Ninguna fuente chilena está completa. Medido contra las APIs reales:
 | Fuente | Acceso | Canales | Aporta |
 |---|---|---|---|
 | **Movistar TV** | REST JSON público (GVP ContentAPI de Telefónica) | 207 | Sinopsis en el 96 %, imagen 1920×1080, elenco, géneros, rating por edad, temporada/episodio |
-| **Zapping TV** | HTML | 177 | Imagen en el 100 %, sinopsis, género, año, duración. Única con el **personaje** de cada actor |
 | **mi.tv** | HTML + JSON-LD | 192 | Sinopsis en el 100 %, género, episodio |
 | **Emisoras** (Mega, Canal 13, La Red) | HTML de cada canal | 3 | Parrilla de primera mano: va por delante ante cambios de última hora |
+| ~~Zapping TV~~ | HTML | — | Desactivada: geobloqueo a Chile, ver más abajo |
 
 Ninguna sola sirve, pero se complementan. El sistema toma la mejor versión de
 cada dato y deja registrado de dónde salió.
 
-Resultado actual: **341 canales, ~26.600 emisiones, 95 % con sinopsis, 87 % con
+Resultado actual: **265 canales, ~23.200 emisiones, 96 % con sinopsis, 85 % con
 imagen, cero solapes.**
 
 ## Uso rápido
@@ -64,7 +64,18 @@ Vercel Blob     →  archivos EPG que subes desde el panel
 **1. Crear la base en Turso** (plan gratuito) y anotar la URL y el token.
 
 **2. Variables de entorno en Vercel** — `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
-y `BLOB_READ_WRITE_TOKEN` (esta última la crea Vercel al añadir un store Blob).
+y `BLOB_READ_WRITE_TOKEN`.
+
+Esta última no se copia a mano: se crea un store Blob y se **vincula** al
+proyecto, y es la vinculación la que inyecta la variable en los tres entornos.
+Un store creado pero sin vincular no aparece en `vercel env ls` y el panel
+sigue guardando en disco efímero. Vale la pena comprobarlo: `/api/stats`
+devuelve `"storage":"blob"` cuando quedó bien y `"disk"` cuando no.
+
+El CLI vincula el store al crearlo (`vercel blob create-store <nombre>`), pero
+el paso de vinculación es interactivo y necesita TTY: en un entorno sin consola
+crea el store y lo deja suelto. Desde el panel de Vercel, en Storage, el store
+se conecta al proyecto sin ese problema.
 
 **3. Los mismos valores como secrets del repo**, para que Actions escriba en la
 misma base: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`.
@@ -262,6 +273,26 @@ con una página de captcha a cualquier cliente automatizado. No se implementa
 evasión del control anti-bot. El adaptador queda escrito en
 `src/sources/directv.ts` por si el acceso se abre; reactivarlo es cambiar
 `enabled: true` en `config/sources.yaml`.
+
+**Zapping está deshabilitado por geobloqueo.** Responde 403 con el cuerpo
+`Acceso denegado: País no permitido` a toda IP fuera de Chile. No es anti-bot
+—el origen es nginx pelado, sin WAF, y el User-Agent da igual—: es el país.
+Medido: desde el runner de GitHub Actions (Azure westus3) da 403; desde una
+conexión residencial chilena, 200 y los 177 canales.
+
+Esto choca de frente con el reparto del despliegue: la ingesta pesada vive en
+Actions justamente porque no cabe en Vercel, y no existe cómputo gratuito con
+salida en Chile. Reactivarla exige ingerir desde una IP chilena —una máquina
+local, o un despliegue en una región de Santiago como `southamerica-west1` de
+GCP o `sa-santiago-1` de Oracle—. Tunelizar por VPN sí funcionaría en
+apariencia, pero es evasión del mismo tipo que la que se rechazó con DirecTV,
+así que no se hace.
+
+Lo que cuesta, medido sobre una fusión de 26.558 emisiones: **2.453 emisiones
+exclusivas (9,2 %) en ~76 canales** que ninguna otra fuente trae. En metadatos
+de programas compartidos no aportaba nada —0 en elenco, categoría, episodio,
+rating y subtítulo—, porque su ventaja teórica, el personaje de cada actor,
+depende de `fetchDetails` y estaba apagado.
 
 Mega redacta su parrilla dentro de una nota editorial en vez de una grilla, así
 que su parser es el más frágil del proyecto: si cambia la redacción deja de

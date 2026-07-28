@@ -37,15 +37,35 @@ sources:
     refreshCron: "0 */6 * * *"
 
   - id: zapping
-    enabled: true
+    enabled: false
     priority: 2
-    # HTML plano, sin bloqueos. Descripción, género, año, duración e imagen
-    # en alta resolución. Es la única fuente que da el nombre del personaje
-    # que interpreta cada actor.
+    # DESACTIVADA: geobloqueo a Chile, incompatible con la ingesta en la nube.
     #
-    # Limitación: cada página cubre desde ahora hasta ~30 h adelante y no
-    # acepta parámetro de fecha, así que enriquece la franja cercana y la
-    # guía a varios días la sostiene Movistar.
+    # El sitio responde 403 con el cuerpo "Acceso denegado: País no permitido"
+    # a cualquier IP fuera de Chile. Medido desde el runner de GitHub Actions
+    # (Azure westus3, EE.UU.): 403. Desde una conexión residencial chilena:
+    # 200 y los 177 canales completos. No es anti-bot ni depende del
+    # User-Agent —el origen es nginx pelado, sin WAF—, es el país de origen.
+    #
+    # Como la ingesta pesada vive en Actions y no hay cómputo gratuito con
+    # salida en Chile, la fuente fallaba en cada corrida. Reactivarla exige
+    # ingerir desde una IP chilena: una máquina local o un despliegue en una
+    # región de Santiago (GCP southamerica-west1, Oracle sa-santiago-1).
+    #
+    # No se implementa evasión del geobloqueo, por la misma razón que no se
+    # implementa evasión del anti-bot de DirecTV.
+    #
+    # Qué se pierde, medido sobre la guía fusionada de 26.558 emisiones:
+    # 2.453 emisiones exclusivas (9,2 %) repartidas en ~76 canales que
+    # ninguna otra fuente trae. En metadatos de programas compartidos no
+    # aportaba nada: 0 en elenco, categoría, episodio, rating y subtítulo.
+    # El elenco con personaje —su ventaja teórica— requiere fetchDetails y
+    # estaba apagado, así que nunca llegó a la guía.
+    #
+    # Limitación adicional, si algún día se reactiva: cada página cubre desde
+    # ahora hasta ~30 h adelante y no acepta parámetro de fecha, así que
+    # enriquece la franja cercana y la guía a varios días la sostiene
+    # Movistar.
     baseUrl: https://guia.zappingtv.com
     # El elenco solo está en la ficha de cada programa: una petición por
     # emisión (~4.000 por ejecución). Activar solo si se quiere ese detalle
