@@ -189,6 +189,13 @@ body {
 }
 .hint.tight { margin: 6px 0 0; font-size: 12.5px; }
 
+.banner {
+  margin: 0; padding: 11px 20px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  border-bottom: 1px solid var(--warn);
+  color: var(--text); font-size: 13.5px; line-height: 1.5;
+}
+
 .dropzone {
   border: 1.5px dashed var(--border);
   border-radius: var(--radius);

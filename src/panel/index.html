@@ -18,6 +18,13 @@
     </div>
   </header>
 
+  <div class="banner" id="no-db" hidden>
+    <strong>Falta configurar la base de datos.</strong>
+    La guía se vacía en cada arranque porque no hay almacenamiento persistente.
+    Define <code>TURSO_DATABASE_URL</code> y <code>TURSO_AUTH_TOKEN</code> en las
+    variables de entorno, y lanza la ingesta desde GitHub Actions.
+  </div>
+
   <section class="sources" id="sources"></section>
 
   <main class="layout">

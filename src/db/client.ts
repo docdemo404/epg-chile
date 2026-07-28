@@ -26,10 +26,24 @@ function resolveUrl(): { url: string; authToken?: string } {
   if (url) {
     return { url, authToken: process.env.TURSO_AUTH_TOKEN };
   }
-  // Sin Turso configurado se cae a un archivo local, que es lo que quieres
-  // en desarrollo y en el runner de CI.
+
+  // En Vercel el sistema de archivos del bundle es de solo lectura: intentar
+  // crear la base ahí revienta el arranque. Se usa /tmp, que sí es escribible,
+  // aunque sea efímero. La guía saldrá vacía —es la señal de que falta
+  // configurar TURSO_DATABASE_URL— pero la app arranca y el panel lo explica,
+  // en vez de devolver un 500 sin pistas.
+  if (process.env.VERCEL) {
+    return { url: 'file:/tmp/epg.db' };
+  }
+
+  // En local y en el runner de CI, un archivo junto al proyecto.
   mkdirSync(DATA_DIR, { recursive: true });
   return { url: `file:${join(DATA_DIR, 'epg.db')}` };
+}
+
+/** True si no hay base persistente configurada (guía vacía por diseño). */
+export function isEphemeral(): boolean {
+  return !process.env.TURSO_DATABASE_URL;
 }
 
 export function getClient(): Client {

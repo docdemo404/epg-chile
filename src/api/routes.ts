@@ -4,8 +4,9 @@ import { loadAliases, loadConfig, saveAliases, type AliasEntry } from '../core/c
 import { slugify } from '../core/normalize.ts';
 import { defaultRange, ingestSource, rebuildChannels, rebuildMerge } from '../core/pipeline.ts';
 import { getJobState, isRunning, startRefresh } from '../core/jobs.ts';
+import { isEphemeral } from '../db/client.ts';
 import { isSupportedUpload, listUploads, parseBuffer } from '../sources/uploads.ts';
-import { deleteFile, fileExists, safeName, writeFile } from '../core/storage.ts';
+import { deleteFile, fileExists, safeName, storageKind, writeFile } from '../core/storage.ts';
 import { generateExport, type ExportFormat } from '../export/index.ts';
 import {
   countProgrammesByChannel,
@@ -80,6 +81,10 @@ export function registerApiRoutes(app: FastifyInstance): void {
       },
       window: { from: range.from, to: range.to },
       timezone: cfg.app.timezone,
+      // Sin base persistente la guía sale vacía tras cada arranque en frío.
+      // Se avisa explícitamente para que no parezca un fallo del agregador.
+      ephemeral: isEphemeral(),
+      storage: storageKind(),
     };
   });
 

@@ -105,6 +105,11 @@ async function loadStats() {
     text += ` · actualizado ${when}`;
   }
   $('#subtitle').textContent = text;
+
+  // Sin base persistente la guía se vacía en cada arranque en frío. Decirlo
+  // evita que parezca que el agregador no encuentra canales.
+  const warn = $('#no-db');
+  if (warn) warn.hidden = !s.ephemeral;
 }
 
 // ------------------------------------------------------------------ canales

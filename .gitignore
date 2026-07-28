@@ -9,3 +9,5 @@ dist-site/
 .vercel/
 prueba-upload.xml.gz
 mi-guia.xml
+
+.vercel
