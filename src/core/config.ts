@@ -12,12 +12,20 @@ const here = dirname(fileURLToPath(import.meta.url));
  * Vercel todo el código colapsa en un único `index.js`, y esa ruta relativa
  * apuntaría fuera del proyecto. Se prueban los candidatos y gana el primero
  * que realmente contenga la configuración.
+ *
+ * El candidato que importa en Vercel es `here`: el build copia `config/` DENTRO
+ * de `index.func/`, al lado del bundle. Faltaba, y la lista solo acertaba de
+ * rebote por `process.cwd()`, es decir, mientras la función arrancase con el
+ * directorio de trabajo puesto en el suyo. El día que dejó de ser así,
+ * `loadConfig()` empezó a lanzar ENOENT antes de registrar una sola ruta y la
+ * app entera respondió 500, incluido `/health`, que ni siquiera toca la base.
  */
 function findRoot(): string {
   const candidates = [
     join(here, '..', '..'), // src/core/config.ts en desarrollo
-    process.cwd(), // raíz del bundle en Vercel (/var/task)
-    join(here, '..'), // el bundle empaquetado, junto a su `config/`
+    here, // el bundle empaquetado: `config/` va JUNTO a index.js
+    process.cwd(), // último recurso, si alguien arranca desde la raíz
+    join(here, '..'),
   ];
   for (const c of candidates) {
     if (existsSync(join(c, 'config', 'sources.yaml'))) return c;
