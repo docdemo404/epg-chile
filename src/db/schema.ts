@@ -120,6 +120,31 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at  INTEGER NOT NULL
 );
 
+/*
+ * Guías remotas añadidas por URL.
+ *
+ * Van en la base y no en un archivo de config porque el panel las escribe en
+ * caliente y en Vercel el sistema de archivos es efímero: un YAML editado por
+ * la función se perdería en la siguiente invocación. La base la comparten
+ * Vercel —que las da de alta— y Actions —que las descarga en cada ingesta—,
+ * que es justo lo que hace falta.
+ *
+ * Se diferencian de un archivo subido en que se vuelven a descargar en cada
+ * ingesta: una URL vale la pena precisamente cuando su contenido cambia.
+ */
+CREATE TABLE IF NOT EXISTS feed_urls (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  url           TEXT NOT NULL UNIQUE,
+  label         TEXT NOT NULL,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  last_fetch_at INTEGER,
+  last_status   TEXT,
+  last_error    TEXT,
+  channel_count INTEGER NOT NULL DEFAULT 0,
+  programme_count INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ca_dictionary (
   pid        TEXT PRIMARY KEY,
   kind       TEXT NOT NULL,

@@ -1,8 +1,12 @@
 import * as cheerio from 'cheerio';
 import { gunzipSync } from 'node:zlib';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { DateTime } from 'luxon';
 import { loadConfig } from '../core/config.ts';
 import { listFiles, readFile } from '../core/storage.ts';
+import { request } from '../core/http.ts';
+import { listFeedUrls, setFeedUrlStatus } from '../db/repo.ts';
 import { preferHttps } from '../core/normalize.ts';
 import type {
   Credits,
@@ -280,6 +284,152 @@ export function parseBuffer(name: string, buf: Buffer): ParsedFile {
   return parseXmltv(text, 'uploads', name, zone);
 }
 
+// ------------------------------------------------------------- guías por URL
+
+/**
+ * Decide el formato por el contenido, no por la extensión.
+ *
+ * Una URL puede no tener extensión útil (`/epg?format=xml`) o mentir, así que
+ * se mira el primer carácter no vacío: `{` o `[` es JSON y cualquier otra cosa
+ * se intenta como XMLTV.
+ */
+function parseText(text: string, label: string): ParsedFile {
+  const zone = loadConfig().app.timezone;
+  const head = text.trimStart()[0];
+  if (head === '{' || head === '[') return parseJson(text, 'uploads', label);
+  return parseXmltv(text, 'uploads', label, zone);
+}
+
+/** Rangos que nunca deben ser destino de una URL escrita desde el panel. */
+/**
+ * Expande un IPv6 a sus 8 grupos numéricos.
+ *
+ * Hace falta porque no se puede razonar sobre la cadena tal cual: `new URL()`
+ * normaliza la dirección y comprime los ceros, así que `::ffff:127.0.0.1`
+ * llega aquí escrito `::ffff:7f00:1`. Comparar texto se rompe justo con la
+ * forma que escribiría alguien buscando saltarse la comprobación.
+ */
+function expandIpv6(ip: string): number[] | null {
+  const [head = '', tail = '', extra] = ip.split('::');
+  if (extra !== undefined) return null; // más de un "::" no es válido
+
+  const toGroups = (part: string): number[] =>
+    part ? part.split(':').map((h) => parseInt(h, 16)) : [];
+
+  const left = toGroups(head);
+  const right = toGroups(tail);
+  const groups = ip.includes('::')
+    ? [...left, ...Array<number>(8 - left.length - right.length).fill(0), ...right]
+    : left;
+
+  if (groups.length !== 8 || groups.some((g) => !Number.isInteger(g) || g < 0 || g > 0xffff)) {
+    return null;
+  }
+  return groups;
+}
+
+function isPrivateAddress(ip: string): boolean {
+  if (isIP(ip) === 6) {
+    const v6 = ip.toLowerCase();
+    // Las formas con IPv4 embebido en decimal (`::ffff:10.0.0.1`) las acepta
+    // `isIP`, pero no se pueden expandir a hexadecimal: se tratan aparte.
+    const dotted = /:(\d+\.\d+\.\d+\.\d+)$/.exec(v6)?.[1];
+    if (dotted) return isPrivateAddress(dotted);
+
+    const g = expandIpv6(v6);
+    if (!g) return true; // ilegible ⇒ se rechaza
+
+    const [g0 = 0, g5 = 0, g6 = 0, g7 = 0] = [g[0], g[5], g[6], g[7]];
+
+    // Sin especificar (::) y loopback (::1).
+    if (g.every((x) => x === 0)) return true;
+    if (g.slice(0, 7).every((x) => x === 0) && g7 === 1) return true;
+    // Enlace local fe80::/10 y únicas locales fc00::/7.
+    if ((g0 & 0xffc0) === 0xfe80) return true;
+    if ((g0 & 0xfe00) === 0xfc00) return true;
+
+    // IPv4 mapeada (::ffff:0:0/96) y la compatible ya obsoleta (::/96): en
+    // ambas los 32 bits finales son una IPv4 que hay que juzgar como tal.
+    const primerosCeros = g.slice(0, 5).every((x) => x === 0);
+    if (primerosCeros && (g5 === 0xffff || g5 === 0)) {
+      const v4 = `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
+      return isPrivateAddress(v4);
+    }
+    return false;
+  }
+
+  const parts = ip.split('.').map(Number);
+  // Ante cualquier cosa que no sea una IPv4 legible, se rechaza: en una
+  // comprobación de seguridad lo desconocido no puede contar como seguro.
+  if (parts.length !== 4) return true;
+  if (parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a = -1, b = -1] = parts;
+
+  return (
+    a === 0 || // "esta" red
+    a === 10 || // privada
+    a === 127 || // loopback
+    (a === 169 && b === 254) || // enlace local y metadatos de nube (169.254.169.254)
+    (a === 172 && b >= 16 && b <= 31) || // privada
+    (a === 192 && b === 168) || // privada
+    (a === 100 && b >= 64 && b <= 127) || // CGNAT
+    a >= 224 // multicast y reservados
+  );
+}
+
+/**
+ * Comprueba que una URL sea segura de pedir desde el servidor.
+ *
+ * El panel no tiene autenticación, así que esta función es lo único que separa
+ * "descargar una guía" de "usar el servidor como puente hacia la red interna".
+ * Se resuelve el nombre y se miran las IP: un dominio puede apuntar a
+ * 127.0.0.1 o a 169.254.169.254, que es donde viven las credenciales de
+ * instancia en varias nubes.
+ *
+ * Queda una ventana teórica de DNS rebinding —entre esta comprobación y la
+ * descarga real el nombre podría cambiar de IP—. Cerrarla exigiría resolver y
+ * conectar por IP fijando el Host, que Node no permite sin un agente propio.
+ * Para el alcance de este proyecto el riesgo es aceptable y conviene que quede
+ * escrito.
+ */
+export async function assertSafeFeedUrl(raw: string): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('La URL no es válida');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Solo se admiten URLs http o https');
+  }
+
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const addresses = isIP(host)
+    ? [host]
+    : (await lookup(host, { all: true }).catch(() => {
+        throw new Error(`No se pudo resolver el dominio ${host}`);
+      })).map((a) => a.address);
+
+  if (!addresses.length) throw new Error(`No se pudo resolver el dominio ${host}`);
+  if (addresses.some(isPrivateAddress)) {
+    throw new Error('Esa URL apunta a una dirección interna o reservada');
+  }
+  return url;
+}
+
+/** Descarga y valida una guía remota sin darla de alta. */
+export async function fetchFeed(raw: string, label: string): Promise<ParsedFile> {
+  const url = await assertSafeFeedUrl(raw);
+  // Sin caché: el sentido de una URL es que su contenido cambie, y al darla de
+  // alta se quiere ver lo que hay ahora, no lo que había hace una hora.
+  const text = await request('uploads', url.toString(), { noCache: true });
+  const parsed = parseText(text, label);
+  if (!parsed.channels.length && !parsed.programmes.length) {
+    throw new Error('La URL no devolvió canales ni programación');
+  }
+  return parsed;
+}
+
 export class UploadsSource implements EpgSource {
   readonly id = 'uploads';
 
@@ -288,6 +438,17 @@ export class UploadsSource implements EpgSource {
     const programmes: RawProgramme[] = [];
     const seenChannel = new Set<string>();
 
+    const absorb = (parsed: ParsedFile): void => {
+      for (const c of parsed.channels) {
+        // Varias guías pueden traer el mismo canal; gana la primera en
+        // llegar, y el orden es estable entre ejecuciones.
+        if (seenChannel.has(c.sourceChannelId)) continue;
+        seenChannel.add(c.sourceChannelId);
+        channels.push(c);
+      }
+      programmes.push(...parsed.programmes);
+    };
+
     const names = (await listFiles())
       .map((f) => f.name)
       .filter((n) => SUPPORTED.test(n))
@@ -295,20 +456,33 @@ export class UploadsSource implements EpgSource {
 
     for (const name of names) {
       try {
-        const parsed = await parseUpload(name);
-        for (const c of parsed.channels) {
-          // Varios archivos pueden traer el mismo canal; gana el primero por
-          // orden alfabético, que es estable entre ejecuciones.
-          if (seenChannel.has(c.sourceChannelId)) continue;
-          seenChannel.add(c.sourceChannelId);
-          channels.push(c);
-        }
-        programmes.push(...parsed.programmes);
+        absorb(await parseUpload(name));
       } catch (err) {
         // Un archivo corrupto no debe impedir que se usen los demás.
         console.warn(`  ! No se pudo leer ${name}: ${err instanceof Error ? err.message : err}`);
       }
     }
+
+    // Las guías por URL se vuelven a descargar en cada ingesta: es la
+    // diferencia con un archivo subido, que es una foto fija.
+    for (const feed of await listFeedUrls()) {
+      if (!feed.enabled) continue;
+      try {
+        const parsed = await fetchFeed(feed.url, feed.label);
+        absorb(parsed);
+        await setFeedUrlStatus(feed.id, 'ok', {
+          channels: parsed.channels.length,
+          programmes: parsed.programmes.length,
+        });
+      } catch (err) {
+        // Igual que con los archivos: una guía remota caída no puede tumbar
+        // las demás. Se registra para que el panel lo muestre.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`  ! No se pudo descargar ${feed.label} (${feed.url}): ${msg}`);
+        await setFeedUrlStatus(feed.id, 'error', { error: msg });
+      }
+    }
+
     return { channels, programmes };
   }
 

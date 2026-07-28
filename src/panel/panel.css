@@ -232,6 +232,31 @@ body {
 }
 .upload .del:hover { color: var(--err); }
 
+/* Alta de guías remotas por URL. */
+.sub {
+  margin: 18px 0 0; font-size: 14px; font-weight: 600;
+  padding-top: 14px; border-top: 1px solid var(--border);
+}
+.feed-add { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.feed-add input {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: 14px;
+  min-width: 0;
+}
+.feed-add input[type="url"] { flex: 3 1 260px; font-family: ui-monospace, monospace; font-size: 13px; }
+.feed-add input[type="text"] { flex: 1 1 130px; }
+.feed-add button { flex: 0 0 auto; }
+.feed-add button[disabled] { opacity: .6; cursor: default; }
+/* La URL completa bajo el nombre: se recorta, y el título la muestra entera. */
+#feeds .uinfo .meta:last-child {
+  font-family: ui-monospace, monospace; font-size: 11.5px; opacity: .75;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+
 /* El panel es el mismo archivo local y publicado; solo cambia qué se muestra.
    Por defecto se asume servidor, y `is-static` invierte la visibilidad. */
 .static-only { display: none; }

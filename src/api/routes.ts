@@ -5,20 +5,25 @@ import { slugify } from '../core/normalize.ts';
 import { defaultRange, ingestSource, rebuildChannels, rebuildMerge } from '../core/pipeline.ts';
 import { getJobState, isRunning, startRefresh } from '../core/jobs.ts';
 import { isEphemeral } from '../db/client.ts';
-import { isSupportedUpload, listUploads, parseBuffer } from '../sources/uploads.ts';
+import { fetchFeed, isSupportedUpload, listUploads, parseBuffer } from '../sources/uploads.ts';
 import { deleteFile, fileExists, safeName, storageKind, writeFile } from '../core/storage.ts';
 import { generateExport, type ExportFormat } from '../export/index.ts';
 import {
+  addFeedUrl,
   countProgrammesByChannel,
+  deleteFeedUrl,
   deleteProfile,
   getChannels,
   getCoverageStats,
+  getFeedUrl,
   getMergedProgrammes,
   getProfileBySlug,
   getRawChannels,
   getSourceStatuses,
+  listFeedUrls,
   listProfiles,
   saveProfile,
+  setFeedUrlEnabled,
 } from '../db/repo.ts';
 
 const FORMATS: ExportFormat[] = ['json', 'xml', 'xml.gz'];
@@ -341,6 +346,97 @@ export function registerApiRoutes(app: FastifyInstance): void {
     await rebuildChannels();
     await rebuildMerge();
     return { deleted: safe };
+  });
+
+  // -------------------------------------------------------- guías por URL
+  app.get('/api/feeds', async () => await listFeedUrls());
+
+  /**
+   * Da de alta una guía remota por URL.
+   *
+   * A diferencia de un archivo subido, la URL se vuelve a descargar en cada
+   * ingesta: sirve para guías de terceros que se actualizan solas. Se descarga
+   * y valida ANTES de guardarla, por el mismo motivo que con los archivos —una
+   * URL que no sirve no debe quedar dada de alta— y además se comprueba que no
+   * apunte a una dirección interna.
+   */
+  app.post('/api/feeds', async (req, reply) => {
+    const body = (req.body ?? {}) as { url?: unknown; label?: unknown };
+    const url = typeof body.url === 'string' ? body.url.trim() : '';
+    if (!url) return reply.code(400).send({ error: 'Falta la URL' });
+
+    const label =
+      typeof body.label === 'string' && body.label.trim()
+        ? body.label.trim()
+        : // Sin nombre, se usa el del archivo remoto; si tampoco, el dominio.
+          (() => {
+            try {
+              const u = new URL(url);
+              return decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() ?? '') || u.hostname;
+            } catch {
+              return url;
+            }
+          })();
+
+    let parsed;
+    try {
+      parsed = await fetchFeed(url, label);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: msg });
+    }
+
+    // El alta se persiste ANTES de recalcular, y el orden importa: incorporar
+    // una guía grande puede pasarse de los 60 s de una función en Vercel. Si
+    // eso ocurre la petición muere, pero la URL ya quedó dada de alta y la
+    // siguiente ingesta —la de Actions, sin límite de tiempo— la recoge sola.
+    // Al revés, un corte dejaría la guía descargada y no registrada.
+    const feed = await addFeedUrl(url, label, {
+      channels: parsed.channels.length,
+      programmes: parsed.programmes.length,
+    });
+
+    try {
+      await ingestSource('uploads');
+      await rebuildChannels();
+      const merge = await rebuildMerge();
+      return { feed, programmes: merge.output };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        feed,
+        warning:
+          `La guía quedó añadida, pero el recálculo falló (${msg}). ` +
+          'Aparecerá en la próxima actualización.',
+      };
+    }
+  });
+
+  app.delete('/api/feeds/:id', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'Id inválido' });
+    if (!(await deleteFeedUrl(id))) return reply.code(404).send({ error: 'No existe esa guía' });
+    await ingestSource('uploads');
+    await rebuildChannels();
+    await rebuildMerge();
+    return { deleted: id };
+  });
+
+  /** Activa o desactiva una guía sin perder la URL ni su historial. */
+  app.patch('/api/feeds/:id', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    const { enabled } = (req.body ?? {}) as { enabled?: unknown };
+    if (!Number.isInteger(id)) return reply.code(400).send({ error: 'Id inválido' });
+    if (typeof enabled !== 'boolean') {
+      return reply.code(400).send({ error: 'Falta `enabled` (true o false)' });
+    }
+    if (!(await setFeedUrlEnabled(id, enabled))) {
+      return reply.code(404).send({ error: 'No existe esa guía' });
+    }
+    await ingestSource('uploads');
+    await rebuildChannels();
+    await rebuildMerge();
+    return { feed: await getFeedUrl(id) };
   });
 
   // ------------------------------------------------- unificación manual

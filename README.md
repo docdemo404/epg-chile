@@ -185,6 +185,36 @@ El archivo se valida **antes** de guardarse, así que uno ilegible nunca llega
 a ensuciar la guía. En local se guarda en `config/uploads/` —versionable en el
 repo— y en Vercel en Blob storage.
 
+### Por URL
+
+En la misma sección del panel puedes pegar la **URL** de una guía en vez de
+subir el archivo. La diferencia está en el ciclo de vida: un archivo subido es
+una foto fija, mientras que **una URL se vuelve a descargar en cada ingesta**.
+Es lo que quieres para una guía de terceros que se actualiza sola.
+
+Se descarga y valida al darla de alta, igual que un archivo. El formato se
+detecta por el contenido y no por la extensión, así que sirve una URL sin
+extensión útil (`/epg?format=xml`). Cada guía se puede desactivar sin perder la
+URL, y si una falla se registra el motivo y las demás siguen.
+
+La lista vive en la base y no en un archivo de configuración: el panel la
+escribe en caliente, y en Vercel un YAML editado por la función se perdería en
+la siguiente invocación. Al estar en la base la comparten Vercel —que las da
+de alta— y Actions —que las descarga en cada ingesta—.
+
+Dos avisos que conviene tener presentes:
+
+- **El panel no tiene autenticación**, así que quien llegue a él puede hacer
+  que el servidor pida una URL. Por eso se rechazan las direcciones internas y
+  reservadas —loopback, rangos privados, CGNAT y el `169.254.169.254` donde
+  varias nubes sirven credenciales de instancia— resolviendo el dominio antes
+  de descargar. Está cubierto en `test/feed-url.test.ts`.
+- **Incorporar una guía grande puede pasarse de los 60 s** de una función en
+  Vercel. El alta se persiste antes de recalcular, así que si la petición muere
+  la URL ya quedó registrada y la siguiente ingesta de Actions —sin límite de
+  tiempo— la recoge sola. Medido en local: una guía de 265 canales y 29.765
+  emisiones tarda ~100 s en descargarse, fusionarse y reconstruirse.
+
 ## Unificar canales a mano
 
 Cuando dos entradas son en realidad el mismo canal y el emparejado automático
@@ -245,6 +275,11 @@ npm test
 | `POST /api/profiles` | Crear un enlace permanente |
 | `POST /api/refresh` | Forzar ingesta (`{"source":"movistar"}` o todas) |
 | `POST /api/rebuild` | Recalcular sin descargar |
+| `GET /api/uploads` · `POST` · `DELETE /api/uploads/{nombre}` | Guías subidas como archivo |
+| `GET /api/feeds` | Guías remotas por URL, con su último resultado |
+| `POST /api/feeds` | Añadir una URL (`{"url":"…","label":"…"}`) |
+| `PATCH /api/feeds/{id}` | Activar o desactivar (`{"enabled":false}`) |
+| `DELETE /api/feeds/{id}` | Quitar una guía remota |
 
 ## Añadir una fuente
 

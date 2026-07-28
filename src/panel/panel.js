@@ -488,6 +488,131 @@ async function uploadFile(file) {
   }
 }
 
+/**
+ * Guías remotas por URL.
+ *
+ * Se construyen con nodos y `textContent` en vez de `innerHTML`: la etiqueta y
+ * la URL las escribe quien usa el panel y volverían aquí sin escapar.
+ */
+async function loadFeeds() {
+  const box = $('#feeds');
+  if (!box) return;
+  let feeds;
+  try {
+    feeds = await api('/api/feeds');
+  } catch {
+    box.textContent = '';
+    return;
+  }
+
+  box.textContent = '';
+  if (!feeds.length) {
+    const p = document.createElement('p');
+    p.className = 'hint';
+    p.textContent = 'Todavía no has añadido ninguna guía por URL.';
+    box.appendChild(p);
+    return;
+  }
+
+  for (const f of feeds) {
+    const el = document.createElement('div');
+    el.className = 'upload' + (f.lastStatus === 'error' ? ' bad' : '');
+
+    const info = document.createElement('div');
+    info.className = 'uinfo';
+
+    const name = document.createElement('div');
+    name.className = 'uname';
+    name.textContent = f.label;
+    if (!f.enabled) name.textContent += ' (desactivada)';
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    if (f.lastStatus === 'error') {
+      const tag = document.createElement('span');
+      tag.className = 'tag warn';
+      tag.textContent = f.lastError || 'error';
+      meta.appendChild(tag);
+    } else {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = 'url';
+      const stats = document.createElement('span');
+      stats.textContent = `${f.channels} canales · ${f.programmes} progs`;
+      meta.append(tag, stats);
+    }
+
+    const link = document.createElement('div');
+    link.className = 'meta';
+    link.textContent = f.url;
+    link.title = f.url;
+
+    info.append(name, meta, link);
+
+    const toggle = document.createElement('button');
+    toggle.className = 'del';
+    toggle.title = f.enabled ? 'Desactivar' : 'Activar';
+    toggle.textContent = f.enabled ? '⏸' : '▶';
+    toggle.addEventListener('click', async () => {
+      try {
+        await api(`/api/feeds/${f.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ enabled: !f.enabled }),
+        });
+        toast(f.enabled ? 'Guía desactivada' : 'Guía activada');
+        await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.title = 'Quitar';
+    del.textContent = '×';
+    del.addEventListener('click', async () => {
+      if (!confirm(`¿Quitar "${f.label}"? Sus datos dejarán de aparecer en la guía.`)) return;
+      try {
+        await api(`/api/feeds/${f.id}`, { method: 'DELETE' });
+        toast('Guía quitada');
+        await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+
+    el.append(info, toggle, del);
+    box.appendChild(el);
+  }
+}
+
+async function addFeed() {
+  const urlInput = $('#feed-url');
+  const labelInput = $('#feed-label');
+  const url = urlInput.value.trim();
+  if (!url) return toast('Pon una URL', true);
+
+  const btn = $('#btn-add-feed');
+  btn.disabled = true;
+  btn.textContent = 'Comprobando…';
+  try {
+    const body = await api('/api/feeds', {
+      method: 'POST',
+      body: JSON.stringify({ url, label: labelInput.value.trim() || undefined }),
+    });
+    if (body.warning) toast(body.warning, true);
+    else toast(`${body.feed.label}: ${body.feed.channels} canales, ${body.feed.programmes} progs`);
+    urlInput.value = '';
+    labelInput.value = '';
+    await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Añadir';
+  }
+}
+
 // -------------------------------------------------------------------- eventos
 
 $('#search').addEventListener('input', renderChannels);
@@ -631,12 +756,21 @@ for (const type of ['dragleave', 'drop']) {
 }
 dropzone.addEventListener('drop', (ev) => uploadFile(ev.dataTransfer.files[0]));
 
+$('#btn-add-feed').addEventListener('click', addFeed);
+// Enter en cualquiera de los dos campos añade, que es lo que espera cualquiera
+// que acabe de pegar una URL.
+for (const id of ['#feed-url', '#feed-label']) {
+  $(id).addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') addFeed();
+  });
+}
+
 (async function init() {
   try {
     await detectMode();
     if (!state.static) renderAllLinks();
     const tasks = [loadSources(), loadStats(), loadChannels(), loadProfiles()];
-    if (!state.static) tasks.push(loadUploads());
+    if (!state.static) tasks.push(loadUploads(), loadFeeds());
     await Promise.all(tasks);
   } catch (err) {
     toast(`No se pudo cargar el panel: ${err.message}`, true);

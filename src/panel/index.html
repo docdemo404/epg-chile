@@ -78,6 +78,21 @@
       </div>
 
       <div id="uploads" class="uploads"></div>
+
+      <h3 class="sub">O añade una guía por URL</h3>
+      <p class="hint tight">
+        A diferencia de un archivo, la URL se vuelve a descargar en cada
+        actualización: úsala para guías de terceros que cambian solas. Se
+        comprueba al añadirla, así que una URL que no sirve no queda guardada.
+      </p>
+
+      <div class="feed-add">
+        <input type="url" id="feed-url" placeholder="https://ejemplo.com/guia.xml.gz" spellcheck="false">
+        <input type="text" id="feed-label" placeholder="Nombre (opcional)">
+        <button type="button" id="btn-add-feed">Añadir</button>
+      </div>
+
+      <div id="feeds" class="uploads"></div>
     </section>
 
     <section class="panel">

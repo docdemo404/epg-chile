@@ -589,3 +589,106 @@ export async function deleteProfile(slug: string): Promise<boolean> {
   const res = await run('DELETE FROM profiles WHERE slug = ?', [slug]);
   return res.changes > 0;
 }
+
+// ------------------------------------------------------------- guías por URL
+
+export interface FeedUrl {
+  id: number;
+  url: string;
+  label: string;
+  enabled: boolean;
+  lastFetchAt: number | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  channels: number;
+  programmes: number;
+  createdAt: number;
+}
+
+function rowToFeed(r: Record<string, unknown>): FeedUrl {
+  return {
+    id: Number(r.id),
+    url: String(r.url),
+    label: String(r.label),
+    enabled: Number(r.enabled) === 1,
+    lastFetchAt: r.last_fetch_at === null ? null : Number(r.last_fetch_at),
+    lastStatus: r.last_status === null ? null : String(r.last_status),
+    lastError: r.last_error === null ? null : String(r.last_error),
+    channels: Number(r.channel_count ?? 0),
+    programmes: Number(r.programme_count ?? 0),
+    createdAt: Number(r.created_at),
+  };
+}
+
+export async function listFeedUrls(): Promise<FeedUrl[]> {
+  await initDb();
+  return (await all('SELECT * FROM feed_urls ORDER BY label, id')).map(rowToFeed);
+}
+
+export async function getFeedUrl(id: number): Promise<FeedUrl | null> {
+  await initDb();
+  const r = await get('SELECT * FROM feed_urls WHERE id = ?', [id]);
+  return r ? rowToFeed(r as Record<string, unknown>) : null;
+}
+
+/**
+ * Da de alta una URL. Si ya existía se actualiza la etiqueta en vez de fallar:
+ * volver a añadir la misma guía con otro nombre es una corrección, no un error.
+ */
+export async function addFeedUrl(
+  url: string,
+  label: string,
+  stats: { channels: number; programmes: number },
+): Promise<FeedUrl> {
+  await initDb();
+  const now = Date.now();
+  await run(
+    `INSERT INTO feed_urls (url, label, enabled, last_fetch_at, last_status,
+                            channel_count, programme_count, created_at)
+     VALUES (?, ?, 1, ?, 'ok', ?, ?, ?)
+     ON CONFLICT(url) DO UPDATE SET
+       label = excluded.label, enabled = 1, last_fetch_at = excluded.last_fetch_at,
+       last_status = 'ok', last_error = NULL,
+       channel_count = excluded.channel_count,
+       programme_count = excluded.programme_count`,
+    [url, label, now, stats.channels, stats.programmes, now],
+  );
+  const r = await get('SELECT * FROM feed_urls WHERE url = ?', [url]);
+  return rowToFeed(r as Record<string, unknown>);
+}
+
+export async function deleteFeedUrl(id: number): Promise<boolean> {
+  await initDb();
+  const res = await run('DELETE FROM feed_urls WHERE id = ?', [id]);
+  return res.changes > 0;
+}
+
+export async function setFeedUrlEnabled(id: number, enabled: boolean): Promise<boolean> {
+  await initDb();
+  const res = await run('UPDATE feed_urls SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id]);
+  return res.changes > 0;
+}
+
+/** Registra el resultado de la última descarga, para que el panel lo muestre. */
+export async function setFeedUrlStatus(
+  id: number,
+  status: 'ok' | 'error',
+  info: { channels?: number; programmes?: number; error?: string },
+): Promise<void> {
+  await initDb();
+  await run(
+    `UPDATE feed_urls
+        SET last_fetch_at = ?, last_status = ?, last_error = ?,
+            channel_count = COALESCE(?, channel_count),
+            programme_count = COALESCE(?, programme_count)
+      WHERE id = ?`,
+    [
+      Date.now(),
+      status,
+      info.error ?? null,
+      info.channels ?? null,
+      info.programmes ?? null,
+      id,
+    ],
+  );
+}

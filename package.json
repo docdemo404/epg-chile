@@ -15,7 +15,7 @@
     "match": "node --experimental-strip-types src/cli/match.ts",
     "merge": "node --experimental-strip-types src/cli/merge.ts",
     "export": "node --experimental-strip-types src/cli/export.ts",
-    "test": "node --experimental-strip-types --test test/normalize.test.ts test/merge.test.ts test/xmltv.test.ts test/channel-match.test.ts",
+    "test": "node --experimental-strip-types --test test/normalize.test.ts test/merge.test.ts test/xmltv.test.ts test/channel-match.test.ts test/feed-url.test.ts",
     "build:site": "node --experimental-strip-types src/cli/build-site.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
