@@ -1,5 +1,6 @@
-# Vercel no lee .gitignore: sin esto sube la base (88 MB), los exports y el
-# sitio estático, y el despliegue revienta por tamaño.
+# Vercel no lee .gitignore. Sin este archivo el despliegue intenta subir la
+# base de datos (88 MB), los exports y el sitio estático: 209 MB que hacen
+# fallar la subida y que además no sirven para nada en la función.
 node_modules
 data
 exports
@@ -12,6 +13,3 @@ test
 Dockerfile
 docker-compose.yml
 *.log
-
-# El bundle es api/index.js; las fuentes TS no hacen falta en la función.
-api/index.ts
