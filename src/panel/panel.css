@@ -232,8 +232,10 @@ body {
 }
 .upload .del:hover { color: var(--err); }
 
-/* Alta de guías remotas por URL. */
-.sub {
+/* Alta de guías remotas por URL.
+   Ojo con el nombre: `.sub` ya lo usa el subtítulo de la cabecera, y una regla
+   suelta con ese nombre le colaba aquí un borde superior y márgenes. */
+.feed-title {
   margin: 18px 0 0; font-size: 14px; font-weight: 600;
   padding-top: 14px; border-top: 1px solid var(--border);
 }
