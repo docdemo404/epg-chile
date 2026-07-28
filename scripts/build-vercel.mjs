@@ -34,9 +34,15 @@ await build({
   platform: 'node',
   target: 'node22',
   format: 'esm',
-  // libSQL resuelve binarios nativos por plataforma; empaquetarlo rompería esa
-  // resolución. Se declara externo y se instala como dependencia normal.
-  external: ['@libsql/client', '@libsql/*', 'libsql', '@vercel/blob'],
+  // El bundle sin minificar ronda los 4,5 MB y la API de subida de Vercel
+  // lo rechazaba con un error interno. Minificado baja lo suficiente.
+  minify: true,
+  // El cliente Node de libSQL carga un binario nativo distinto por plataforma,
+  // y aquí se construye en una máquina para desplegar en otra. El cliente web
+  // es JS puro y habla exactamente el protocolo de Turso, que es la única base
+  // que se usa en Vercel: se sustituye uno por otro al empaquetar.
+  alias: { '@libsql/client': '@libsql/client/web' },
+  external: ['@vercel/blob'],
   banner: {
     // Dependencias transitivas que aún usan `require`: en un bundle ESM hay
     // que reponerlo.

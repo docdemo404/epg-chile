@@ -25,13 +25,15 @@ function resolveUrl(): { url: string; authToken?: string } {
     return { url, authToken: process.env.TURSO_AUTH_TOKEN };
   }
 
-  // En Vercel el sistema de archivos del bundle es de solo lectura: intentar
-  // crear la base ahí revienta el arranque. Se usa /tmp, que sí es escribible,
-  // aunque sea efímero. La guía saldrá vacía —es la señal de que falta
-  // configurar TURSO_DATABASE_URL— pero la app arranca y el panel lo explica,
-  // en vez de devolver un 500 sin pistas.
+  // En Vercel el bundle usa el cliente web de libSQL, que solo habla por red:
+  // no existe la opción de una base en disco. Se avisa con un mensaje claro
+  // en vez de fallar con un error de resolución incomprensible.
   if (process.env.VERCEL) {
-    return { url: 'file:/tmp/epg.db' };
+    throw new Error(
+      'Falta TURSO_DATABASE_URL. En Vercel el almacenamiento es efímero, así ' +
+        'que la guía necesita una base Turso; configúrala en las variables de ' +
+        'entorno del proyecto.',
+    );
   }
 
   // En local y en el runner de CI, un archivo junto al proyecto.
