@@ -1,33 +1,56 @@
-name: Desplegar en Vercel
+name: Verificar y desplegar
 
-# Despliegue continuo: cada push a main publica en producción.
+# Dos cosas en un solo workflow, y el orden importa.
 #
-# Se construye AQUÍ y se sube con `--prebuilt` en vez de dejar que Vercel
-# compile. Es el mismo motivo por el que existe scripts/build-vercel.mjs: el
-# builder de Vercel no arrastra `src/` al transpilar api/index.ts, así que el
-# despliegue se emite con el Build Output API desde una máquina que sí tiene
-# el repo entero.
+# 1. Verificar SIEMPRE: tipos y pruebas en cada push. No depende de ningún
+#    secret, así que funciona tal cual esté configurado el despliegue.
+# 2. Desplegar solo si hay `VERCEL_TOKEN`.
 #
-# Requisitos (una vez):
-#   - Secret VERCEL_TOKEN  → vercel.com/account/tokens
-#   - Secret VERCEL_ORG_ID y VERCEL_PROJECT_ID → están en .vercel/project.json
+# El paso 1 vale por sí solo aunque el despliegue lo haga Vercel por su cuenta
+# a través de la conexión con GitHub: en ese modo Vercel publica sin comprobar
+# nada, y esto es lo que avisa de que algo se rompió.
+#
+# Si el proyecto se conecta a Git desde el panel de Vercel, el bloque de
+# despliegue de aquí sobra: se puede borrar de `deploy` hacia abajo y dejar
+# solo la verificación.
 
 on:
   push:
     branches: [main]
-    # Cambios que no afectan a lo que se sirve no merecen un despliegue.
-    paths-ignore:
-      - 'README.md'
-      - '.github/workflows/epg.yml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
-  # Dos despliegues a la vez publicarían en orden impredecible.
-  group: deploy-produccion
+  group: verificar-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  verificar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Comprobar tipos
+        run: npm run typecheck
+
+      - name: Pruebas
+        run: npm test
+
+  desplegar:
+    needs: verificar
+    # Solo desde main, y nunca desde un pull request: el secret no debe
+    # exponerse a una rama que cualquiera pueda proponer.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -36,17 +59,20 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
-      # Sin el token no se puede desplegar, pero fallar en cada push mientras
-      # no esté configurado solo genera ruido. Se avisa y se sale limpio.
+      # Sin token no se puede desplegar, pero fallar en cada push mientras no
+      # esté configurado solo genera ruido. Se avisa y se sale limpio.
       - name: Comprobar que hay token
         id: guard
         run: |
           if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
             echo "listo=no" >> "$GITHUB_OUTPUT"
             {
-              echo "### Despliegue omitido"
+              echo "### Despliegue omitido (los tests sí pasaron)"
               echo ""
-              echo 'Falta el secret `VERCEL_TOKEN`. Créalo en'
+              echo 'No hay secret `VERCEL_TOKEN`. Es lo esperado si el'
+              echo 'despliegue lo hace Vercel por su conexión con GitHub.'
+              echo ''
+              echo 'Si prefieres desplegar desde aquí, crea el token en'
               echo '<https://vercel.com/account/tokens> y añádelo en'
               echo 'Settings → Secrets and variables → Actions.'
             } >> "$GITHUB_STEP_SUMMARY"
@@ -67,16 +93,9 @@ jobs:
         if: steps.guard.outputs.listo == 'si'
         run: npm ci
 
-      # Si esto falla, el despliegue no debe salir: es la red de seguridad que
-      # justifica desplegar sin intervención.
-      - name: Comprobar tipos
-        if: steps.guard.outputs.listo == 'si'
-        run: npm run typecheck
-
-      - name: Pruebas
-        if: steps.guard.outputs.listo == 'si'
-        run: npm test
-
+      # Se construye AQUÍ y se sube con `--prebuilt` en vez de dejar que Vercel
+      # compile, por el mismo motivo por el que existe build-vercel.mjs: el
+      # builder de Vercel no arrastra `src/` al transpilar api/index.ts.
       - name: Construir el Build Output
         if: steps.guard.outputs.listo == 'si'
         run: npm run build

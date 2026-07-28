@@ -88,13 +88,24 @@ vercel deploy --prod --prebuilt --archive=tgz
 
 ### Despliegue continuo
 
-`.github/workflows/deploy.yml` publica en producción con cada push a `main`,
-después de pasar `typecheck` y las pruebas: si algo de eso falla, no se
-despliega.
+Hay dos formas y no son equivalentes. La recomendada es **conectar el
+repositorio desde el panel de Vercel**: no hay ninguna credencial que guardar,
+rotar ni filtrar, y eso pesa especialmente en un repositorio público. Un token
+de Vercel puede leer las variables de entorno de la cuenta —o sea,
+`TURSO_AUTH_TOKEN` y `BLOB_READ_WRITE_TOKEN`—, así que guardarlo en los
+secrets equivale a dejar ahí la llave de todo el stack.
 
-Construye en el runner y sube con `--prebuilt` en vez de dejar compilar a
-Vercel, por el mismo motivo que existe `scripts/build-vercel.mjs` (ver más
-abajo). Necesita tres secrets; `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` salen de
+Se activa en dos pasos, ambos en el navegador: añadir GitHub en
+<https://vercel.com/account/login-connections> y conectar el repositorio en los
+ajustes Git del proyecto. A partir de ahí, cada push a `main` despliega solo.
+
+Su punto flaco es que Vercel publica **sin comprobar nada**. Por eso
+`.github/workflows/deploy.yml` verifica tipos y pruebas en cada push aunque el
+despliegue no pase por él: no bloquea la publicación, pero avisa.
+
+La otra forma es desplegar desde Actions, que sí es un portón —no publica si
+algo falla— a cambio de gestionar el token. El workflow ya lo contempla y solo
+necesita tres secrets; `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` salen de
 `.vercel/project.json`, y el token se crea en
 <https://vercel.com/account/tokens>:
 
@@ -102,13 +113,8 @@ abajo). Necesita tres secrets; `VERCEL_ORG_ID` y `VERCEL_PROJECT_ID` salen de
 VERCEL_TOKEN · VERCEL_ORG_ID · VERCEL_PROJECT_ID
 ```
 
-Mientras falte `VERCEL_TOKEN` el workflow no falla: se salta el despliegue y
-deja la explicación en el resumen de la ejecución.
-
-La alternativa es conectar el repositorio desde el panel de Vercel, que evita
-tener que gestionar un token. Requiere añadir GitHub como método de acceso a
-la cuenta de Vercel, y a cambio Vercel compila por su cuenta ejecutando el
-`buildCommand` de `vercel.json`.
+Mientras falte `VERCEL_TOKEN` el workflow no falla: verifica igual y se salta
+solo el despliegue, dejando la explicación en el resumen de la ejecución.
 
 Sin `TURSO_DATABASE_URL` el proyecto cae a un archivo SQLite local, que es lo
 que quieres en desarrollo y lo que usa el contenedor Docker. En Vercel, en
