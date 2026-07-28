@@ -196,6 +196,8 @@ body {
   color: var(--text); font-size: 13.5px; line-height: 1.5;
 }
 
+.banner .detail { margin-top: 5px; font-family: ui-monospace, monospace; font-size: 12px; opacity: .85; }
+
 .dropzone {
   border: 1.5px dashed var(--border);
   border-radius: var(--radius);

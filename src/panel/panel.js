@@ -109,7 +109,13 @@ async function loadStats() {
   // Sin base persistente la guía se vacía en cada arranque en frío. Decirlo
   // evita que parezca que el agregador no encuentra canales.
   const warn = $('#no-db');
-  if (warn) warn.hidden = !s.ephemeral;
+  if (warn) {
+    warn.hidden = !s.ephemeral;
+    // El mensaje del servidor dice exactamente qué falta; es más útil que el
+    // texto genérico del HTML.
+    const detail = warn.querySelector('.detail');
+    if (detail) detail.textContent = s.setupError || '';
+  }
 }
 
 // ------------------------------------------------------------------ canales

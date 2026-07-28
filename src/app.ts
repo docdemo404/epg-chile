@@ -27,7 +27,40 @@ export async function buildApp(): Promise<FastifyInstance> {
     trustProxy: true,
   });
 
-  await initDb();
+  // Un fallo de base no debe tumbar la app entera: si arranca, el panel puede
+  // cargar y explicar qué falta configurar. Un 500 sin cuerpo no dice nada.
+  let dbError: string | null = null;
+  try {
+    await initDb();
+  } catch (err) {
+    dbError = err instanceof Error ? err.message : String(err);
+    app.log.error(`Base no disponible: ${dbError}`);
+  }
+
+  // Las rutas que necesitan datos responden 503 con el motivo, en vez de
+  // reventar con un stack trace. `/api/stats` se responde aquí mismo con
+  // ceros: es lo que alimenta el aviso del panel, así que tiene que llegar.
+  app.addHook('onRequest', async (req, reply) => {
+    if (!dbError) return;
+    if (!req.url.startsWith('/api/') && !req.url.startsWith('/epg/')) return;
+
+    if (req.url.startsWith('/api/stats')) {
+      return reply.send({
+        channels: 0,
+        multiSourceChannels: 0,
+        programmes: 0,
+        coverage: { desc: 0, image: 0, credits: 0, category: 0, episode: 0 },
+        timezone: cfg.app.timezone,
+        ephemeral: true,
+        setupError: dbError,
+      });
+    }
+    if (req.url.startsWith('/api/sources')) return reply.send([]);
+    if (req.url.startsWith('/api/channels') || req.url.startsWith('/api/profiles')) {
+      return reply.send([]);
+    }
+    return reply.code(503).send({ error: dbError, needsSetup: true });
+  });
 
   // Las guías XMLTV comprimidas de terceros rondan los pocos MB; 64 deja
   // margen de sobra para un XML sin comprimir de una guía grande.
