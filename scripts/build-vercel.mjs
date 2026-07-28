@@ -42,7 +42,11 @@ await build({
   // es JS puro y habla exactamente el protocolo de Turso, que es la única base
   // que se usa en Vercel: se sustituye uno por otro al empaquetar.
   alias: { '@libsql/client': '@libsql/client/web' },
-  external: ['@vercel/blob'],
+  // `@vercel/blob` va DENTRO del bundle. Estuvo marcado como external, y eso
+  // funcionaba solo porque sin BLOB_READ_WRITE_TOKEN el código que lo importa
+  // nunca llegaba a ejecutarse. Al configurar Blob, toda la API de subidas
+  // empezó a responder 500 con ERR_MODULE_NOT_FOUND: la función se despliega
+  // como un único archivo, sin node_modules donde resolverlo.
   banner: {
     // Dependencias transitivas que aún usan `require`: en un bundle ESM hay
     // que reponerlo.
