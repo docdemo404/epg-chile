@@ -45,10 +45,20 @@ function toast(message, isError = false) {
   toast._t = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
+/**
+ * El `Content-Type` solo se pone cuando hay cuerpo que enviar.
+ *
+ * Ponerlo siempre rompía todas las llamadas sin cuerpo —borrar un enlace, una
+ * guía o un archivo, y recalcular o actualizar—: Fastify ve la cabecera, exige
+ * un JSON que nunca llega y responde 400 (`FST_ERR_CTP_EMPTY_JSON_BODY`).
+ */
 async function api(path, options = {}) {
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      ...(options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...options.headers,
+    },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -445,9 +455,15 @@ async function loadProfiles() {
     del.title = 'Eliminar enlace';
     del.addEventListener('click', async () => {
       if (!confirm(`¿Eliminar el enlace "${p.name}"? Dejará de funcionar en tus reproductores.`)) return;
-      await api(`/api/profiles/${p.slug}`, { method: 'DELETE' });
-      toast('Enlace eliminado');
-      loadProfiles();
+      // Sin este `catch` el fallo se perdía como promesa rechazada y la única
+      // pista de que borrar no funcionaba era que el enlace seguía ahí.
+      try {
+        await api(`/api/profiles/${encodeURIComponent(p.slug)}`, { method: 'DELETE' });
+        toast('Enlace eliminado');
+        await loadProfiles();
+      } catch (err) {
+        toast(err.message, true);
+      }
     });
 
     const acts = document.createElement('div');
