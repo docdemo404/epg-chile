@@ -1,0 +1,99 @@
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import YAML from 'yaml';
+
+const here = dirname(fileURLToPath(import.meta.url));
+export const ROOT = join(here, '..', '..');
+export const CONFIG_DIR = join(ROOT, 'config');
+export const DATA_DIR = process.env.EPG_DATA_DIR ?? join(ROOT, 'data');
+export const EXPORT_DIR = process.env.EPG_EXPORT_DIR ?? join(ROOT, 'exports');
+export const CACHE_DIR = process.env.EPG_CACHE_DIR ?? join(ROOT, 'cache');
+
+export interface RateLimitConfig {
+  concurrency: number;
+  minDelayMs: number;
+}
+
+export interface SourceConfig {
+  id: string;
+  enabled: boolean;
+  priority: number;
+  baseUrl: string;
+  refreshCron: string;
+  rateLimit: RateLimitConfig;
+  [key: string]: unknown;
+}
+
+export interface AppConfig {
+  app: {
+    timezone: string;
+    daysAhead: number;
+    daysBehind: number;
+    userAgent: string;
+  };
+  sources: SourceConfig[];
+  fieldPriority: Record<string, string[]>;
+  matching: {
+    channelNameThreshold: number;
+    programme: {
+      minOverlapRatio: number;
+      maxStartDriftMinutes: number;
+      titleThreshold: number;
+    };
+  };
+  http: {
+    timeoutMs: number;
+    retries: number;
+    backoffBaseMs: number;
+    cacheTtlMinutes: number;
+  };
+}
+
+export interface AliasEntry {
+  canonical: string;
+  xmltvId: string;
+  match: Record<string, (string | number)[]>;
+}
+
+export interface AliasConfig {
+  channels: AliasEntry[];
+  ignore?: { sources?: Record<string, (string | number)[]> };
+}
+
+let cachedConfig: AppConfig | null = null;
+
+export function loadConfig(force = false): AppConfig {
+  if (cachedConfig && !force) return cachedConfig;
+  const raw = readFileSync(join(CONFIG_DIR, 'sources.yaml'), 'utf8');
+  cachedConfig = YAML.parse(raw) as AppConfig;
+  return cachedConfig;
+}
+
+export function getSourceConfig(id: string): SourceConfig {
+  const cfg = loadConfig();
+  const found = cfg.sources.find((s) => s.id === id);
+  if (!found) throw new Error(`Fuente no configurada en sources.yaml: ${id}`);
+  return found;
+}
+
+const ALIAS_PATH = join(CONFIG_DIR, 'channel-aliases.yaml');
+
+export function loadAliases(): AliasConfig {
+  if (!existsSync(ALIAS_PATH)) return { channels: [] };
+  const parsed = YAML.parse(readFileSync(ALIAS_PATH, 'utf8')) as AliasConfig | null;
+  return { channels: parsed?.channels ?? [], ignore: parsed?.ignore };
+}
+
+/**
+ * Persiste los alias. El panel llama aquí cuando resuelves un canal a mano,
+ * de modo que la corrección sobreviva a las re-ingestas.
+ */
+export function saveAliases(aliases: AliasConfig): void {
+  const doc = new YAML.Document(aliases);
+  doc.commentBefore =
+    ' Vínculos manuales entre canales de distintas fuentes.\n' +
+    ' Tiene prioridad absoluta sobre el emparejado automático.\n' +
+    ' Editado por el panel: los comentarios extensos viven en git.';
+  writeFileSync(ALIAS_PATH, doc.toString({ lineWidth: 0 }), 'utf8');
+}

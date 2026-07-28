@@ -1,0 +1,24 @@
+services:
+  epg:
+    build: .
+    container_name: api-epg-cl
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # La zona del contenedor debe coincidir con app.timezone de sources.yaml:
+      # los cron del scheduler se programan en esa zona.
+      TZ: America/Santiago
+      LOG_LEVEL: info
+      # EPG_SCHEDULER=off deja la app solo como API, sin refresco automático.
+      EPG_SCHEDULER: "on"
+    volumes:
+      - epg-data:/data
+      - epg-cache:/cache
+      - ./exports:/exports
+      # Config montada desde el host: editar fuentes o alias no exige rebuild.
+      - ./config:/app/config
+
+volumes:
+  epg-data:
+  epg-cache:

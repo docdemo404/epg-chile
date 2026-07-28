@@ -1,0 +1,38 @@
+{
+  "name": "api-epg-cl",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agregador multi-fuente de guía de programación de TV de Chile con exportación XMLTV/JSON",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --experimental-strip-types --watch src/server.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "fetch": "node --experimental-strip-types src/cli/fetch.ts",
+    "match": "node --experimental-strip-types src/cli/match.ts",
+    "merge": "node --experimental-strip-types src/cli/merge.ts",
+    "export": "node --experimental-strip-types src/cli/export.ts",
+    "test": "node --experimental-strip-types --test test/normalize.test.ts test/merge.test.ts test/xmltv.test.ts test/channel-match.test.ts",
+    "build:site": "node --experimental-strip-types src/cli/build-site.ts"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^10.1.0",
+    "@fastify/static": "^8.0.4",
+    "@libsql/client": "^0.17.4",
+    "@vercel/blob": "^2.6.1",
+    "cheerio": "^1.0.0",
+    "fastify": "^5.2.0",
+    "luxon": "^3.5.0",
+    "node-cron": "^3.0.3",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^22.10.2",
+    "@types/node-cron": "^3.0.11",
+    "typescript": "^5.7.2"
+  }
+}

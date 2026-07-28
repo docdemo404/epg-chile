@@ -1,0 +1,164 @@
+# Configuración de fuentes EPG.
+#
+# `priority` decide quién gana en el merge campo a campo: número más bajo gana.
+# Se puede afinar por campo en `fieldPriority` más abajo.
+
+app:
+  timezone: America/Santiago
+  # Días de guía a mantener hacia adelante (0 = solo hoy).
+  daysAhead: 3
+  # Días de guía pasada que se conservan antes de purgar.
+  daysBehind: 1
+  userAgent: "api-epg-cl/1.0 (+agregador EPG personal)"
+
+sources:
+  # Nota sobre `priority`: decide qué fuente FIJA el horario de un canal
+  # cubierto por varias. Manda el orden, no el volumen de datos — los
+  # agregadores encadenan emisiones sin huecos y siempre parecen cubrir más
+  # que el EPG del operador, que sí deja huecos reales.
+
+  - id: movistar
+    enabled: true
+    priority: 1
+    # La fuente más rica: descripción, elenco, géneros, rating por edad.
+    baseUrl: https://contentapi-cl.cdn.telefonica.com
+    instance: "26"
+    catalog: default
+    language: es-CL
+    referer: https://movistartv.cl/
+    # Canales por request de /schedules. Subirlo acorta la ingesta pero
+    # alarga la URL; 20 va holgado por debajo del límite del gateway.
+    channelBatchSize: 20
+    # Ventana temporal por request, en horas.
+    windowHours: 6
+    rateLimit:
+      concurrency: 3
+      minDelayMs: 250
+    refreshCron: "0 */6 * * *"
+
+  - id: zapping
+    enabled: true
+    priority: 2
+    # HTML plano, sin bloqueos. Descripción, género, año, duración e imagen
+    # en alta resolución. Es la única fuente que da el nombre del personaje
+    # que interpreta cada actor.
+    #
+    # Limitación: cada página cubre desde ahora hasta ~30 h adelante y no
+    # acepta parámetro de fecha, así que enriquece la franja cercana y la
+    # guía a varios días la sostiene Movistar.
+    baseUrl: https://guia.zappingtv.com
+    # El elenco solo está en la ficha de cada programa: una petición por
+    # emisión (~4.000 por ejecución). Activar solo si se quiere ese detalle
+    # y asumiendo el coste en tiempo y en carga sobre el sitio.
+    fetchDetails: false
+    rateLimit:
+      concurrency: 2
+      minDelayMs: 600
+    refreshCron: "20 */6 * * *"
+
+  - id: broadcasters
+    enabled: true
+    # Deliberadamente NO es prioridad 1, pese a ser fuente de primera mano.
+    #
+    # `priority` decide quién posee la línea de tiempo del canal, y las
+    # emisoras publican solo el título: cero sinopsis, cero categorías, cero
+    # elenco. Al ponerlas por delante, Canal 13 se quedaba con una guía de
+    # títulos sueltos porque se descartaban las emisiones de Movistar que no
+    # casaban exactamente en horario, y con ellas toda su metadata.
+    #
+    # El sitio correcto para su autoridad es `fieldPriority.title`, más abajo:
+    # corrigen el título oficial de las emisiones que sí casan y rellenan los
+    # huecos que deje la fuente principal, sin secuestrar la parrilla.
+    priority: 3
+    # Parrillas publicadas por las propias emisoras chilenas: van por delante
+    # de los operadores ante cambios de última hora.
+    #
+    # Mega redacta su parrilla dentro de una nota editorial en vez de una
+    # grilla: es el parser más frágil y puede dejar de aportar si cambia la
+    # redacción, sin afectar al resto de la guía.
+    baseUrl: https://www.mega.cl
+    broadcasters: [mega, canal13, lared]
+    rateLimit:
+      concurrency: 1
+      minDelayMs: 1000
+    refreshCron: "50 */8 * * *"
+
+  - id: uploads
+    enabled: true
+    # Archivos que subes desde el panel (XMLTV, .xml.gz o el JSON que exporta
+    # este proyecto). Prioridad alta a propósito: si te tomas el trabajo de
+    # subir una guía es porque sabes algo que las fuentes automáticas no.
+    #
+    # Viven en config/uploads/ para poder versionarlos en el repo.
+    priority: 2
+    baseUrl: file://config/uploads
+    rateLimit:
+      concurrency: 1
+      minDelayMs: 0
+    # Son archivos locales: no hay nada que descargar en un cron.
+    refreshCron: ""
+
+  - id: directv
+    # DESHABILITADA: la guía de DirecTV está protegida por Radware y responde
+    # con una página de captcha a cualquier cliente automatizado. No se
+    # implementa evasión del control anti-bot. El adaptador queda escrito por
+    # si el acceso se abre en el futuro.
+    enabled: false
+    priority: 9
+    baseUrl: https://www.directv.cl
+    # La grilla se sirve en bloques de 3 horas.
+    blockHours: 3
+    rateLimit:
+      concurrency: 2
+      minDelayMs: 400
+    refreshCron: "20 */6 * * *"
+
+  - id: mitv
+    enabled: true
+    priority: 4
+    # Relleno adicional de sinopsis. Un request por canal y día:
+    # es la fuente más costosa y la que exige más cortesía.
+    baseUrl: https://mi.tv
+    country: cl
+    rateLimit:
+      concurrency: 2
+      minDelayMs: 1200
+    refreshCron: "40 */12 * * *"
+
+# Prioridad por campo. Sobrescribe el `priority` global de cada fuente.
+# El primero de la lista que traiga un valor no vacío gana.
+fieldPriority:
+  # El título oficial lo pone quien emite; las emisoras van primero en su señal.
+  title: [uploads, broadcasters, movistar, zapping, mitv]
+  # Movistar tiene sinopsis en el 96% de sus emisiones: es la mejor con
+  # diferencia. Las emisoras no publican sinopsis, así que van al final.
+  desc: [uploads, movistar, zapping, mitv, broadcasters]
+  subTitle: [mitv, movistar, zapping]
+  categories: [movistar, zapping, mitv]
+  # Zapping es la única que da el personaje de cada actor, pero solo si
+  # fetchDetails está activo; si no, Movistar aporta el reparto.
+  credits: [movistar, zapping, mitv]
+  rating: [movistar, mitv, zapping]
+  episode: [mitv, movistar, zapping]
+  # Para imágenes no manda el orden sino la mayor resolución disponible;
+  # esta lista solo resuelve empates.
+  images: [zapping, movistar, mitv, broadcasters]
+
+matching:
+  # Umbral de similitud (coeficiente de Dice) para vincular canales
+  # automáticamente. Por debajo de esto queda pendiente de revisión manual.
+  channelNameThreshold: 0.82
+  # Tolerancia al emparejar programas entre fuentes.
+  programme:
+    # Solape mínimo entre dos emisiones para considerarlas el mismo programa.
+    minOverlapRatio: 0.5
+    # Desfase máximo tolerado entre horas de inicio, en minutos.
+    maxStartDriftMinutes: 15
+    titleThreshold: 0.72
+
+http:
+  timeoutMs: 30000
+  retries: 3
+  # Backoff exponencial: delay = backoffBaseMs * 2^intento
+  backoffBaseMs: 1000
+  cacheTtlMinutes: 30

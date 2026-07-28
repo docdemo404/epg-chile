@@ -1,0 +1,93 @@
+# Vínculos manuales entre canales de distintas fuentes.
+# Tiene prioridad absoluta sobre el emparejado automático.
+# Editado por el panel: los comentarios extensos viven en git.
+
+channels:
+  - canonical: TVN
+    xmltvId: tvn.cl
+    match:
+      movistar:
+        - LCH1225
+        - LCH1227
+      zapping:
+        - tvn
+      mitv:
+        - tvn
+  - canonical: Mega
+    xmltvId: mega.cl
+    match:
+      movistar:
+        - LCH497
+        - LCH865
+      zapping:
+        - mega
+      mitv:
+        - mega
+      broadcasters:
+        - mega
+  - canonical: Chilevisión
+    xmltvId: chilevision.cl
+    match:
+      movistar:
+        - LCH481
+      zapping:
+        - chv
+      mitv:
+        - chilevision
+  - canonical: Canal 13
+    xmltvId: canal13.cl
+    match:
+      movistar:
+        - LCH482
+      zapping:
+        - canal13
+      mitv:
+        - canal-13
+      broadcasters:
+        - canal13
+  - canonical: La Red
+    xmltvId: lared.cl
+    match:
+      movistar:
+        - LCH884
+        - LCH1202
+      zapping:
+        - lared
+      mitv:
+        - la-red
+      broadcasters:
+        - lared
+  - canonical: 24 Horas
+    xmltvId: 24horas.cl
+    match:
+      movistar:
+        - LCH594
+      zapping:
+        - 24horas
+      mitv:
+        - tvn-24-h
+  - canonical: 13C
+    xmltvId: 13c.cl
+    match:
+      zapping:
+        - 13cable
+      mitv:
+        - canal-13-c
+  - canonical: TV+
+    xmltvId: tvmas.cl
+    match:
+      movistar:
+        - LCH566
+        - LCH650
+      zapping:
+        - tvmas
+  - canonical: BabyTV
+    xmltvId: baby-tv.cl
+    match:
+      mitv:
+        - babytv
+      movistar:
+        - LCH6350
+        - LCH864
+ignore:
+  sources: {}

@@ -1,0 +1,60 @@
+# Enlaces permanentes que se publican como archivos estáticos.
+#
+# En el despliegue estático no hay servidor donde guardar perfiles, así que
+# viven aquí. Cada entrada genera `epg/{slug}.{formato}` en el sitio.
+#
+# Los canales se referencian por `xmltvId`, NO por id numérico: el id depende
+# de la base y en CI se reconstruye desde cero en cada ejecución, mientras que
+# el xmltvId es estable. El panel te da esta lista lista para pegar.
+#
+# `match` acepta xmltvId exactos y, opcionalmente, patrones sobre el nombre.
+
+site:
+  # Título del panel publicado.
+  title: Guía EPG Chile
+  # Formatos que se generan para cada perfil.
+  # La guía completa en .xml son ~20 MB y en .json ~31 MB; publicarlos infla
+  # el sitio sin aportar mucho, porque los reproductores leen igual el .gz.
+  formats: [xml, xml.gz]
+
+profiles:
+  # La guía completa. `all: true` incluye todos los canales.
+  - name: Guía completa
+    slug: all
+    all: true
+    # Solo comprimido: 2 MB frente a 20 MB del XML plano.
+    formats: [xml.gz]
+
+  - name: TV Abierta
+    slug: tv-abierta
+    match:
+      xmltvId:
+        - tvn.cl
+        - mega.cl
+        - chilevision.cl
+        - canal13.cl
+        - lared.cl
+        - 24horas.cl
+        - tvmas.cl
+
+  - name: Deportes
+    slug: deportes
+    match:
+      # Patrones sobre el nombre del canal, sin distinguir mayúsculas.
+      namePattern:
+        - '^ESPN'
+        - '^TNT Sports'
+        - 'Fox Sports'
+        - 'DSports'
+        - 'Golf'
+
+  - name: Infantil
+    slug: infantil
+    match:
+      namePattern:
+        - 'Cartoon'
+        - 'Disney'
+        - 'Nick'
+        - 'Discovery Kids'
+        - 'Baby TV'
+        - 'Boomerang'

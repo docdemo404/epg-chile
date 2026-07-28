@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+exports/
+cache/
+*.log
+.env
+dist-site/
+.vercel/
+prueba-upload.xml.gz
+mi-guia.xml

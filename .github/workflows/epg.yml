@@ -1,0 +1,72 @@
+name: Actualizar guía EPG
+
+# La ingesta completa tarda ~16 minutos, sobre todo por mi.tv, que pide un
+# archivo por canal y día con pausa de cortesía. Eso no cabe en una función
+# serverless (60 s en Vercel), pero sí en Actions, que permite hasta 6 horas.
+#
+# Reparto: Actions hace el trabajo pesado y escribe en Turso; Vercel solo lee
+# esa base y sirve el panel y los enlaces permanentes.
+
+on:
+  schedule:
+    # Cada 6 horas. Los cron de GitHub son UTC; Chile es UTC-4 (o -3 en
+    # verano), así que esto cae aproximadamente a las 00, 06, 12 y 18 locales.
+    - cron: '10 4,10,16,22 * * *'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Fuente concreta a ingerir (vacío = todas)'
+        required: false
+        type: string
+
+concurrency:
+  # Dos ingestas simultáneas se pisarían al reconstruir la guía.
+  group: epg-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # Sin este token el adaptador de uploads lee del disco del runner, que
+      # es lo correcto: los archivos subidos viven en Blob y hay que leerlos
+      # de ahí para que la ingesta los tenga en cuenta.
+      BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+      TZ: America/Santiago
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ingerir fuentes
+        run: |
+          if [ -n "${{ inputs.source }}" ]; then
+            npm run fetch -- --source="${{ inputs.source }}"
+          else
+            npm run fetch
+          fi
+
+      - name: Unificar canales
+        run: npm run match
+
+      - name: Fusionar guía
+        run: npm run merge
+
+      - name: Resumen
+        run: |
+          {
+            echo "### Guía actualizada"
+            echo ""
+            npm run --silent match 2>/dev/null | head -12
+          } >> "$GITHUB_STEP_SUMMARY"
