@@ -51,6 +51,16 @@ export interface SourceConfig {
   baseUrl: string;
   refreshCron: string;
   rateLimit: RateLimitConfig;
+  /**
+   * Fuente aislada: sus canales nunca se unifican con los de otra fuente ni
+   * intercambian metadatos con ellos. Es lo que corresponde a una guía de otro
+   * país, donde un emparejado por nombre solo puede acertar por casualidad.
+   */
+  isolated?: boolean;
+  /** Sufijo del xmltvId de sus canales. `cl` por defecto. */
+  xmltvSuffix?: string;
+  /** Sistema de calificación por edad que se declara en el XMLTV. `CL` por defecto. */
+  ratingSystem?: string;
   [key: string]: unknown;
 }
 

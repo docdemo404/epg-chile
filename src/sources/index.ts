@@ -4,6 +4,7 @@ import { BroadcastersSource } from './broadcasters.ts';
 import { DirectvSource } from './directv.ts';
 import { MitvSource } from './mitv.ts';
 import { MovistarSource } from './movistar.ts';
+import { TivifySource } from './tivify.ts';
 import { UploadsSource } from './uploads.ts';
 import { ZappingSource } from './zapping.ts';
 
@@ -22,6 +23,7 @@ const REGISTRY: Record<string, () => EpgSource> = {
   broadcasters: () => new BroadcastersSource(),
   uploads: () => new UploadsSource(),
   directv: () => new DirectvSource(),
+  tivify: () => new TivifySource(),
 };
 
 export function createSource(id: string): EpgSource {
@@ -38,4 +40,4 @@ export function enabledSources(): EpgSource[] {
     .map((s) => createSource(s.id));
 }
 
-export { DirectvSource, MitvSource, MovistarSource };
+export { DirectvSource, MitvSource, MovistarSource, TivifySource };

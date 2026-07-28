@@ -85,6 +85,64 @@ test('normalizeChannelName quita acentos y sufijos de calidad', () => {
   assert.equal(normalizeChannelName('MEGA / MEGA HD'), 'MEGA MEGA');
 });
 
+/**
+ * Aislamiento de fuentes.
+ *
+ * `tivify` va marcada como `isolated` en config/sources.yaml porque emite
+ * canales españoles. Estos casos comprueban que la frontera aguanta los tres
+ * caminos por los que un canal podría colarse al otro lado.
+ */
+test('una fuente aislada no se une a otra ni con el nombre idéntico', () => {
+  const report = run([ch('movistar', 'LCH1', 'La 1'), ch('tivify', '5afe', 'La 1', 1)]);
+  assert.equal(report.channels.length, 2, 'son canales de países distintos');
+  for (const c of report.channels) {
+    assert.equal(new Set(c.links.map((l) => l.sourceId)).size, 1);
+  }
+});
+
+test('una fuente aislada tampoco se une por parecido tipográfico', () => {
+  // Sin la frontera de dominio, "La Red" y "La 1" se comparan como cualquier
+  // otro par de nombres y basta con que uno pase el umbral.
+  const report = run([
+    ch('movistar', 'LCH884', 'La Red', 12),
+    ch('tivify', '5afe', 'La Sexta', 6),
+    ch('tivify', '5aff', 'Antena 3', 3),
+  ]);
+  for (const c of report.channels) {
+    const sources = new Set(c.links.map((l) => l.sourceId));
+    assert.ok(!(sources.has('tivify') && sources.size > 1), `${c.canonicalName} cruzó la frontera`);
+  }
+});
+
+test('los canales de una fuente aislada llevan su propio sufijo de xmltvId', () => {
+  const report = run([ch('movistar', 'LCH1', 'Mega'), ch('tivify', '5afe', 'Telecinco', 5)]);
+  const mega = report.channels.find((c) => c.canonicalName === 'Mega');
+  const t5 = report.channels.find((c) => c.canonicalName === 'Telecinco');
+  assert.match(mega!.xmltvId, /\.cl$/);
+  assert.match(t5!.xmltvId, /\.es$/);
+});
+
+test('una fuente aislada sí agrupa sus propias señales gemelas', () => {
+  // El aislamiento es entre fuentes, no dentro de una: Tivify publica dos
+  // entradas "TV3 CAT" y siguen siendo el mismo canal.
+  const report = run([ch('tivify', 'a', 'TV3 CAT', 301), ch('tivify', 'b', 'TV3 CAT', 302)]);
+  assert.equal(report.channels.length, 1);
+  assert.equal(report.channels[0]!.links.length, 2);
+});
+
+test('los canales de una fuente aislada no ensucian la lista de pendientes', () => {
+  // No tienen con quién vincularse por definición: listarlos como pendientes
+  // de revisión enterraría los chilenos que sí lo están.
+  const report = run([
+    ch('movistar', 'LCH9', 'Canal Regional Raro', 700),
+    ch('tivify', '5afe', 'Cuatro', 4),
+  ]);
+  assert.deepEqual(
+    report.unlinked.map((u) => u.sourceId),
+    ['movistar'],
+  );
+});
+
 test('los canales sin pareja quedan marcados para revisión', () => {
   const report = run([
     ch('movistar', 'LCH9', 'Canal Regional Raro', 700),

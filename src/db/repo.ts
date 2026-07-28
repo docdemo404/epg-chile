@@ -270,6 +270,11 @@ export async function getChannels(): Promise<ChannelWithLinks[]> {
   await initDb();
   const chans = await all('SELECT * FROM channels ORDER BY canonical_name');
   const links = await all('SELECT * FROM channel_links');
+  const isolatedSources = new Set(
+    loadConfig()
+      .sources.filter((s) => s.isolated)
+      .map((s) => s.id),
+  );
 
   const byChannel = new Map<number, Record<string, unknown>[]>();
   for (const l of links) {
@@ -279,7 +284,7 @@ export async function getChannels(): Promise<ChannelWithLinks[]> {
     byChannel.set(cid, arr);
   }
 
-  return chans.map((c) => {
+  const out = chans.map((c) => {
     const id = Number(c.id);
     const ls = byChannel.get(id) ?? [];
     const numbers: Record<string, number> = {};
@@ -304,6 +309,17 @@ export async function getChannels(): Promise<ChannelWithLinks[]> {
       })),
     };
   });
+
+  // Los canales de una fuente aislada van en bloque al final, en vez de
+  // intercalarse por orden alfabético. Son de otro país: mezclar 300 canales
+  // españoles entre los chilenos deja la lista del panel —y el XMLTV, que
+  // conserva este orden— imposible de recorrer.
+  const foreign = (c: ChannelWithLinks): number =>
+    c.sources.length && c.sources.every((s) => isolatedSources.has(s)) ? 1 : 0;
+
+  return out.sort(
+    (a, b) => foreign(a) - foreign(b) || a.canonicalName.localeCompare(b.canonicalName, 'es'),
+  );
 }
 
 /** Índice (sourceId, sourceChannelId) -> channelId, usado por la fusión. */

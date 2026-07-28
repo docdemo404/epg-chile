@@ -119,10 +119,41 @@ sources:
     refreshCron: ""
 
   - id: directv
-    # DESHABILITADA: la guía de DirecTV está protegida por Radware y responde
-    # con una página de captcha a cualquier cliente automatizado. No se
-    # implementa evasión del control anti-bot. El adaptador queda escrito por
-    # si el acceso se abre en el futuro.
+    # DESHABILITADA: la guía de DirecTV está protegida por Radware Bot Manager
+    # y responde con un desafío de JavaScript a cualquier cliente automatizado.
+    # No se implementa evasión del control anti-bot. El adaptador queda escrito
+    # por si el acceso se abre en el futuro.
+    #
+    # Reinvestigado el 2026-07-28 desde una conexión residencial chilena. El
+    # dato existe y el adaptador es correcto —el grabber de iptv-org/epg para
+    # DirecTV AR/UY usa el mismo método y las mismas dos trampas que ya están
+    # implementadas—; lo único que falta es pasar el anti-bot, y eso solo lo
+    # logra un navegador que ejecute el JS del desafío. Medido, todo con
+    # User-Agent identificable:
+    #
+    #  - Todo el host responde 302 a validate.perfdrive.com: guia.aspx, /guia/,
+    #    /movil/ProgramGuide y directv.cl sin www. Solo robots.txt y
+    #    sitemap.xml pasan.
+    #  - La guía migró a directvla.com/cl, detrás del mismo WAF. El baseUrl de
+    #    abajo apunta al host antiguo; da igual, ambos bloquean.
+    #  - Suplantar el User-Agent como Chrome no alcanza: sigue el 302.
+    #  - Sin tolerancia por sesión: tres tarros de cookies limpios, tres
+    #    bloqueos. No hay margen para un goteo lento y cortés.
+    #  - Los sitios hermanos (.com.ar, .com.co, .com.pe, .com.ec, .com.uy)
+    #    escalan al mismo desafío, y cada despliegue sirve la grilla de su
+    #    país: PGCulture=es-CL sobre el host argentino no cambia el catálogo.
+    #  - DGO no es alcanzable desde aquí y su guía exige suscripción.
+    #
+    # Reactivar exige que DirecTV abra el acceso. Mientras tanto, las vías
+    # legítimas para meter esta guía son las que ya ofrece el panel: subir un
+    # XMLTV o registrar una guía remota por URL.
+    #
+    # Para el día que se abra: existe guia/ChannelDetail.aspx/GetProgramming,
+    # que devuelve un día completo de un canal en una sola petición en vez de
+    # bloques de 3 horas. Renombra el contenedor a `filterParameters` y añade
+    # isChannelDetails: "Y", channelNum y channelName, con time: 0. Puede que
+    # ese endpoint sí traiga la sinopsis que el de bloques deja vacía; sin
+    # acceso no se pudo verificar.
     enabled: false
     priority: 9
     baseUrl: https://www.directv.cl
@@ -132,6 +163,44 @@ sources:
       concurrency: 2
       minDelayMs: 400
     refreshCron: "20 */6 * * *"
+
+  - id: tivify
+    enabled: true
+    # AISLADA: son canales de ESPAÑA, no de Chile.
+    #
+    # `isolated` la saca por completo de la unificación: sus canales no se
+    # emparejan con los de ninguna otra fuente —ni por alias manual— y, al no
+    # compartir canal unificado, tampoco intercambian metadatos en el merge.
+    # La guía española queda al lado de la chilena, nunca mezclada con ella.
+    #
+    # Sin esa frontera el emparejado difuso las cruzaría: "La 1" contra "La
+    # Red", "TV3" contra "TV+", y saldría un canal con media parrilla de cada
+    # país. El nombre es la única señal que hay para vincular canales, y entre
+    # dos países distintos esa señal miente.
+    isolated: true
+    # Los ids XMLTV terminan en `.es` en vez de `.cl`, así que la separación
+    # también es visible en el archivo y no puede haber colisión de ids.
+    xmltvSuffix: es
+    ratingSystem: ES
+    # `priority` aquí casi no decide nada —no compite con nadie por la
+    # parrilla de un canal—: solo ordena esta fuente en el panel.
+    priority: 6
+    # www.tivify.tv es una SPA sin HTML útil: la guía sale del CDN de TVUP,
+    # que es de donde la lee la propia web. Un archivo JSON por día cubre los
+    # ~314 canales, así que es la fuente más barata en peticiones y la más
+    # cara en bytes: 10-15 MB por día. De ahí el cron espaciado.
+    baseUrl: https://mediasync.tvup.cloud
+    # Host de imágenes: las rutas del JSON son relativas a él.
+    mediaUrl: https://media.tvup.cloud
+    # Carrier anónimo, el que ve quien entra a tivify.tv sin cuenta. Está en
+    # el bundle de la web como `anonymous.carrierId`; no hay autenticación.
+    carrierId: "5ea94948bf8cbb0072c89fa6"
+    # Idioma de los diccionarios de género y categoría (llegan como ids).
+    language: es
+    rateLimit:
+      concurrency: 1
+      minDelayMs: 500
+    refreshCron: "30 */8 * * *"
 
   - id: mitv
     enabled: true
@@ -147,6 +216,9 @@ sources:
 
 # Prioridad por campo. Sobrescribe el `priority` global de cada fuente.
 # El primero de la lista que traiga un valor no vacío gana.
+#
+# `tivify` no aparece en ninguna lista y no es un olvido: está aislada, así que
+# nunca comparte emisión con otra fuente y no hay prioridad que resolver.
 fieldPriority:
   # El título oficial lo pone quien emite; las emisoras van primero en su señal.
   title: [uploads, broadcasters, movistar, zapping, mitv]

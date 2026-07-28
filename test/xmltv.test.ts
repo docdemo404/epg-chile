@@ -54,6 +54,21 @@ test('el XMLTV incluye todos los metadatos disponibles', () => {
   assert.match(xml, /<icon src="https:\/\/cdn\/poster\.jpg" \/>/);
 });
 
+test('el sistema de rating es el del país de la fuente', () => {
+  // "14" es la calificación chilena y "TP" la española: anunciar ambas como
+  // system="CL" haría que el reproductor muestre una etiqueta de otro país.
+  const cl = buildXmltv(channels, programmes);
+  assert.match(cl, /<rating system="CL">/);
+
+  const español: ChannelWithLinks = { ...channels[0]!, id: 2, xmltvId: 'la-1.es', sources: ['tivify'] };
+  const es = buildXmltv(
+    [español],
+    [{ ...programmes[0]!, channelId: 2, rating: 'TP' }],
+  );
+  assert.match(es, /<rating system="ES">/);
+  assert.ok(!es.includes('system="CL"'));
+});
+
 test('los tiempos salen en hora de Santiago con su offset', () => {
   const xml = buildXmltv(channels, programmes);
   // 18:00 UTC en julio = 14:00 en Chile (-04).

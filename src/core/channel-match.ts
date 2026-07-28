@@ -18,7 +18,20 @@ import type { ImageRef, RawChannel } from './types.ts';
  * Cascada: alias manual > nombre normalizado idéntico > similitud difusa por
  * encima del umbral. Lo que no llega al umbral queda sin vincular y visible
  * en el panel, en vez de fusionarse mal en silencio.
+ *
+ * Toda la cascada respeta los DOMINIOS: una fuente marcada como `isolated` en
+ * sources.yaml forma su propio dominio y sus canales solo pueden agruparse
+ * entre sí. Es lo que mantiene separada una guía de otro país —Tivify emite
+ * canales españoles— de la parrilla chilena, que es con la que sí tiene
+ * sentido fusionar. Sin esa frontera, "La 1" y "Canal 13" se emparejarían por
+ * parecido tipográfico y la guía mezclaría dos países en un solo canal.
  */
+
+/** Dominio de las fuentes que no están aisladas: todas comparten uno. */
+const SHARED_DOMAIN = '*compartido*';
+
+/** Sufijo por defecto del xmltvId; las fuentes aisladas declaran el suyo. */
+const DEFAULT_XMLTV_SUFFIX = 'cl';
 
 export interface ChannelLink {
   sourceId: string;
@@ -61,6 +74,17 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
   const aliases = loadAliases();
   const threshold = cfg.matching.channelNameThreshold;
 
+  const isolatedSources = new Set(cfg.sources.filter((s) => s.isolated).map((s) => s.id));
+  /** Cada fuente aislada es su propio dominio; el resto comparten uno. */
+  const domainOf = (sourceId: string): string =>
+    isolatedSources.has(sourceId) ? sourceId : SHARED_DOMAIN;
+  const suffixOf = (domain: string): string =>
+    (domain === SHARED_DOMAIN
+      ? undefined
+      : cfg.sources.find((s) => s.id === domain)?.xmltvSuffix) ?? DEFAULT_XMLTV_SUFFIX;
+  const domainOfGroup = (g: UnifiedChannel): string =>
+    g.links.length ? domainOf(g.links[0]!.sourceId) : SHARED_DOMAIN;
+
   const all: RawChannel[] = [];
   for (const list of rawBySource.values()) all.push(...list);
 
@@ -93,10 +117,18 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
     const links: ChannelLink[] = [];
     const logos: ImageRef[] = [];
     const altNames: string[] = [];
+    // El primer canal que entra fija el dominio del grupo. Un alias que
+    // intente cruzar la frontera —vincular un canal español con uno chileno—
+    // se queda solo con el primer lado; el aislamiento no es negociable ni
+    // siquiera a mano.
+    let domain: string | null = null;
 
     const take = (raw: RawChannel, manual: boolean): void => {
       const k = key(raw.sourceId, raw.sourceChannelId);
       if (claimed.has(k)) return;
+      const d = domainOf(raw.sourceId);
+      if (domain === null) domain = d;
+      else if (domain !== d) return;
       claimed.add(k);
       links.push({
         sourceId: raw.sourceId,
@@ -128,7 +160,7 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
     }
     if (!links.length) continue;
     groups.push({
-      xmltvId: alias.xmltvId || `${slugify(alias.canonical)}.cl`,
+      xmltvId: alias.xmltvId || `${slugify(alias.canonical)}.${suffixOf(domain ?? SHARED_DOMAIN)}`,
       canonicalName: alias.canonical,
       altNames: dedupe(altNames.filter((n) => n !== alias.canonical)),
       logos: dedupeLogos(logos),
@@ -136,26 +168,27 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
     });
   }
 
-  // --- 2. Nombre normalizado idéntico.
-  const byNormalized = new Map<string, RawChannel[]>();
+  // --- 2. Nombre normalizado idéntico, dentro de un mismo dominio.
+  const byNormalized = new Map<string, { domain: string; norm: string; members: RawChannel[] }>();
   for (const [k, raw] of byKey) {
     if (claimed.has(k)) continue;
     const norm = normalizeChannelName(raw.fullName || raw.name);
     if (!norm) continue;
-    const arr = byNormalized.get(norm) ?? [];
-    arr.push(raw);
-    byNormalized.set(norm, arr);
+    const domain = domainOf(raw.sourceId);
+    const entry = byNormalized.get(`${domain}::${norm}`) ?? { domain, norm, members: [] };
+    entry.members.push(raw);
+    byNormalized.set(`${domain}::${norm}`, entry);
   }
 
   // Se procesan los grupos más poblados primero: fijan primero los casos
   // inequívocos y dejan menos margen a un emparejado difuso dudoso.
-  const normEntries = [...byNormalized.entries()].sort((a, b) => b[1].length - a[1].length);
+  const normEntries = [...byNormalized.values()].sort((a, b) => b.members.length - a.members.length);
 
-  for (const [norm, members] of normEntries) {
-    const fresh = members.filter((m) => !claimed.has(key(m.sourceId, m.sourceChannelId)));
+  for (const entry of normEntries) {
+    const fresh = entry.members.filter((m) => !claimed.has(key(m.sourceId, m.sourceChannelId)));
     if (!fresh.length) continue;
     for (const m of fresh) claimed.add(key(m.sourceId, m.sourceChannelId));
-    groups.push(buildGroup(norm, fresh, 1));
+    groups.push(buildGroup(entry.norm, fresh, 1, suffixOf(entry.domain)));
   }
 
   // --- 3. Clave compacta: une los que solo difieren en separadores o en el
@@ -170,9 +203,12 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
   for (const g of groups) {
     const compact = channelMatchKey(g.canonicalName);
     if (!compact) continue;
-    const arr = byCompact.get(compact) ?? [];
+    // El dominio va en la clave: así dos canales de países distintos con el
+    // mismo nombre compacto nunca llegan siquiera a compararse.
+    const compactKey = `${domainOfGroup(g)}::${compact}`;
+    const arr = byCompact.get(compactKey) ?? [];
     arr.push(g);
-    byCompact.set(compact, arr);
+    byCompact.set(compactKey, arr);
   }
 
   const absorbed = new Set<UnifiedChannel>();
@@ -213,6 +249,9 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
       if (merged.has(b)) continue;
       const bSources = new Set(b.links.map((l) => l.sourceId));
       if ([...bSources].some((s) => aSources.has(s))) continue;
+      // El parecido tipográfico es justo lo que no vale entre dominios: es
+      // como acabaría "La 1" (España) emparejada con "La Red" (Chile).
+      if (domainOfGroup(a) !== domainOfGroup(b)) continue;
 
       const score = diceCoefficient(aNorm, normalizeChannelName(b.canonicalName));
       if (score < threshold) continue;
@@ -227,27 +266,44 @@ export function matchChannels(rawBySource: Map<string, RawChannel[]>): MatchRepo
 
   const finalGroups = groups.filter((g) => !merged.has(g));
 
-  // xmltvId único y estable.
+  // xmltvId único y estable. El sufijo lo pone el dominio: los canales
+  // españoles terminan en `.es` y los chilenos en `.cl`, así que ni siquiera
+  // pueden colisionar entre países dentro del mismo XMLTV.
   const usedIds = new Set<string>();
   for (const g of finalGroups) {
-    let id = g.xmltvId || `${slugify(g.canonicalName)}.cl`;
+    const suffix = suffixOf(domainOfGroup(g));
+    let id = g.xmltvId || `${slugify(g.canonicalName)}.${suffix}`;
     if (usedIds.has(id)) {
+      const stem = id.endsWith(`.${suffix}`) ? id.slice(0, -(suffix.length + 1)) : id;
       let n = 2;
-      while (usedIds.has(`${id.replace(/\.cl$/, '')}-${n}.cl`)) n++;
-      id = `${id.replace(/\.cl$/, '')}-${n}.cl`;
+      while (usedIds.has(`${stem}-${n}.${suffix}`)) n++;
+      id = `${stem}-${n}.${suffix}`;
     }
     usedIds.add(id);
     g.xmltvId = id;
   }
 
   finalGroups.sort((a, b) => {
+    // Las fuentes aisladas van en bloque al final: intercalar 300 canales
+    // españoles por número entre los chilenos deja la guía ilegible, porque
+    // el número de canal solo significa algo dentro de su propia parrilla.
+    const da = domainOfGroup(a);
+    const db = domainOfGroup(b);
+    if (da !== db) {
+      if (da === SHARED_DOMAIN) return -1;
+      if (db === SHARED_DOMAIN) return 1;
+      return da.localeCompare(db);
+    }
     const na = minNumber(a);
     const nb = minNumber(b);
     if (na !== nb) return na - nb;
     return a.canonicalName.localeCompare(b.canonicalName, 'es');
   });
 
+  // Una fuente aislada nunca tiene con quién vincularse: listar sus canales
+  // como "pendientes de revisión" enterraría los que sí lo están de verdad.
   const unlinked = finalGroups
+    .filter((g) => domainOfGroup(g) === SHARED_DOMAIN)
     .filter((g) => new Set(g.links.map((l) => l.sourceId)).size === 1)
     .flatMap((g) =>
       g.links.map((l) => ({
@@ -283,7 +339,12 @@ function minNumber(g: UnifiedChannel): number {
   return nums.length ? Math.min(...nums) : Number.MAX_SAFE_INTEGER;
 }
 
-function buildGroup(normalized: string, members: RawChannel[], confidence: number): UnifiedChannel {
+function buildGroup(
+  normalized: string,
+  members: RawChannel[],
+  confidence: number,
+  xmltvSuffix: string,
+): UnifiedChannel {
   // El nombre visible sale de la fuente de mayor prioridad, prefiriendo la
   // versión larga cuando existe: "TELEVISION NACIONAL" lee mejor que "TVN".
   const cfg = loadConfig();
@@ -299,7 +360,7 @@ function buildGroup(normalized: string, members: RawChannel[], confidence: numbe
   );
 
   return {
-    xmltvId: `${slugify(normalized)}.cl`,
+    xmltvId: `${slugify(normalized)}.${xmltvSuffix}`,
     canonicalName,
     altNames,
     logos: dedupeLogos(members.flatMap((m) => m.logos)),

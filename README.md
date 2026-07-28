@@ -5,6 +5,9 @@ los canales que se repiten entre ellas, **fusiona los metadatos campo a campo**
 y publica la guía como XMLTV, XML.GZ o JSON en **enlaces permanentes** listos
 para pegar en Kodi, Tvheadend, Jellyfin o Plex.
 
+Lleva además la guía de **España** (Tivify), que viaja aparte: es una fuente
+aislada y no se fusiona con nada chileno. Ver [Guía de España](#guía-de-españa).
+
 ## Por qué existe
 
 Ninguna fuente chilena está completa. Medido contra las APIs reales:
@@ -15,12 +18,13 @@ Ninguna fuente chilena está completa. Medido contra las APIs reales:
 | **mi.tv** | HTML + JSON-LD | 192 | Sinopsis en el 100 %, género, episodio |
 | **Emisoras** (Mega, Canal 13, La Red) | HTML de cada canal | 3 | Parrilla de primera mano: va por delante ante cambios de última hora |
 | ~~Zapping TV~~ | HTML | — | Desactivada: geobloqueo a Chile, ver más abajo |
+| **Tivify** (España) | JSON del CDN de TVUP | 303 | Guía española completa. **Aislada**: no se fusiona con las chilenas |
 
 Ninguna sola sirve, pero se complementan. El sistema toma la mejor versión de
 cada dato y deja registrado de dónde salió.
 
-Resultado actual: **265 canales, ~23.200 emisiones, 96 % con sinopsis, 85 % con
-imagen, cero solapes.**
+Resultado actual: **569 canales —266 chilenos y 303 españoles—, ~56.800
+emisiones, 97 % con sinopsis, 89 % con imagen, cero solapes.**
 
 ## Uso rápido
 
@@ -230,6 +234,9 @@ tratarla como válida dejaría media guía sin sinopsis.
 Cada campo queda anotado con su origen (`provenance`), visible en el panel y en
 el JSON. Sin eso es imposible depurar un dato raro.
 
+Una fuente marcada como `isolated` queda fuera de todo esto: no comparte canal
+con nadie, así que nunca hay nada que fusionar. Ver [Guía de España](#guía-de-españa).
+
 ## Unificación de canales
 
 `TVN` (Movistar), `tvn` (Zapping) y `tvn` (mi.tv) son el mismo canal. La
@@ -244,6 +251,65 @@ Los vínculos manuales viven en `config/channel-aliases.yaml` y tienen prioridad
 absoluta. El panel escribe ahí, así que las correcciones sobreviven a cualquier
 re-ingesta. Nombrar un canal en un alias arrastra sus señales gemelas: Movistar
 publica dos "CANAL 13 SPA" (SD y HD) y ambas pertenecen al mismo canal.
+
+## Guía de España
+
+Tivify emite canales **españoles**, así que entra como fuente **aislada**
+(`isolated: true` en `config/sources.yaml`) y no se mezcla con nada chileno.
+
+La unificación trabaja por **dominios**: cada fuente aislada forma el suyo y
+sus canales solo pueden agruparse entre ellos. Toda la cascada lo respeta —el
+alias manual incluido, que tampoco puede cruzar la frontera—, y como un canal
+español nunca comparte canal unificado con uno chileno, tampoco hay forma de
+que le preste ni le tome un metadato en el merge.
+
+No es una precaución teórica. El nombre es la única señal que hay para vincular
+canales, y entre países distintos esa señal miente: "La 1" contra "La Red",
+"TV3" contra "TV+", "Cuatro" contra "Canal 13". Sin la frontera saldrían
+canales con media parrilla de cada país, y eso no se ve venir mirando la guía:
+parece un canal normal con la programación cambiada.
+
+La separación se nota en tres sitios:
+
+- Los ids XMLTV españoles acaban en **`.es`** y los chilenos en `.cl`, así que
+  ni siquiera pueden colisionar dentro del mismo archivo.
+- Los canales españoles van **en bloque al final** de la lista, en el panel y
+  en el export. El número de canal solo significa algo dentro de su parrilla:
+  intercalar por número los 303 españoles entre los chilenos deja la guía
+  ilegible.
+- No aparecen entre los **pendientes de vincular** del panel. No tienen con
+  quién vincularse por definición, y listarlos enterraría los chilenos que sí
+  esperan revisión.
+
+El rating también viaja con su país: la calificación española (`TP`, `+12`) se
+publica como `<rating system="ES">` y la chilena sigue en `system="CL"`. Lo
+declara `ratingSystem` en la configuración de cada fuente.
+
+**Cómo se obtiene.** `www.tivify.tv/canales` es una SPA sin HTML útil; la guía
+sale del CDN de TVUP, que es de donde la lee la propia web, con el carrier
+anónimo —el que ve quien entra sin cuenta—. No hay autenticación, ni geobloqueo,
+ni nada que evadir:
+
+```
+{cdn}/media/carrier/{carrierId}/channels.json      · 320 canales
+{cdn}/media/carrier/{carrierId}/epg/{a}/{m}/{d}.json · un día completo, todos los canales
+{cdn}/media/genres.es.json · {cdn}/media/categories.es.json
+```
+
+Es la fuente más barata en peticiones y la más cara en bytes: **un request por
+día** cubre los 303 canales, pero cada archivo pesa de 10 a 15 MB. Por eso el
+cron va espaciado y la ingesta corre en Actions, no en la función serverless.
+
+Medido: **310 canales, 27.133 emisiones en 4 días, 99 % con sinopsis, 92 % con
+imagen, 97 % con categoría**. Las horas llegan en ISO con `Z`, así que aquí no
+hay conversión de zona que pueda desplazar la guía.
+
+Dos rarezas de la fuente que el adaptador tiene que absorber: un mismo evento
+viene repetido dentro del archivo del día —mismo `eventId`, distinto `_id`— y
+otra vez en el archivo de cada día que atraviesa, así que se deduplica por
+`eventId`; y los canales sin guía real traen un único evento de 24 h con el
+nombre del canal, que el resolutor de solapes recorta o descarta cuando hay
+programación de verdad.
 
 ## Añadir tu propia guía
 
@@ -303,6 +369,11 @@ mano se pierden. La documentación extensa vive en este README y en git.
 
 `config/sources.yaml` — fuentes, prioridades globales y por campo, límites de
 tasa, cron de refresco, ventana de días.
+
+Tres claves por fuente gobiernan el aislamiento: `isolated` la saca de la
+unificación, `xmltvSuffix` cambia la terminación de sus ids XMLTV (`es` en vez
+de `cl`) y `ratingSystem` declara el sistema de calificación por edad que se
+publica en el XMLTV.
 
 `config/channel-aliases.yaml` — vínculos manuales y canales a ignorar.
 
@@ -366,6 +437,10 @@ conversión desde hora chilena ocurre dentro del adaptador y en ningún otro
 sitio, con la zona IANA `America/Santiago` — nunca un offset fijo, porque Chile
 cambia entre −04 y −03 y un offset fijo desplaza media guía dos veces al año.
 
+Si la fuente es de **otro país**, además `isolated: true` y su propio
+`xmltvSuffix`. El adaptador no cambia en nada: el aislamiento vive entero en la
+unificación de canales.
+
 ## Fuentes y cortesía
 
 Las fuentes son endpoints no documentados de terceros. Todo el tráfico sale por
@@ -376,11 +451,63 @@ objetivo es refrescar la guía unas pocas veces al día.
 Si una fuente falla, se conservan sus últimos datos buenos y la fusión sigue con
 las demás: la guía nunca se degrada por una caída puntual.
 
-**DirecTV está deshabilitado.** Su guía está protegida por Radware y responde
-con una página de captcha a cualquier cliente automatizado. No se implementa
-evasión del control anti-bot. El adaptador queda escrito en
-`src/sources/directv.ts` por si el acceso se abre; reactivarlo es cambiar
-`enabled: true` en `config/sources.yaml`.
+**Tivify** es la excepción amable del lote: sirve la guía en archivos estáticos
+de su CDN, sin autenticación, sin geobloqueo y sin anti-bot. La contrapartida
+es el volumen —10 a 15 MB por día— y de ahí que su cron sea el más espaciado
+de todos pese a ser el que menos peticiones hace.
+
+**DirecTV está deshabilitado.** Su guía está protegida por Radware Bot Manager
+(ShieldSquare) y responde con un desafío de JavaScript a cualquier cliente
+automatizado. No se implementa evasión del control anti-bot. El adaptador queda
+escrito en `src/sources/directv.ts` por si el acceso se abre; reactivarlo es
+cambiar `enabled: true` en `config/sources.yaml`.
+
+Reinvestigado a fondo el 2026-07-28, desde una conexión residencial chilena.
+El dato existe y está vigente: cargada en un navegador real, la guía muestra la
+grilla chilena completa del día. El adaptador también es correcto —el grabber de
+`iptv-org/epg` para DirecTV Argentina y Uruguay usa exactamente el mismo método,
+los mismos parámetros y las mismas dos trampas (`filtersScreenFilters: [""]` e
+`isHd: ""`) que ya están implementadas—. Lo único que falta es pasar el control
+anti-bot, y eso solo lo logra un navegador que ejecute el JS del desafío.
+
+Qué se midió, todo con `User-Agent` identificable:
+
+- **Todo el dominio está detrás del WAF.** `www.directv.cl`, `directv.cl` sin
+  `www`, `/guia/guia.aspx`, `/guia/` y `/movil/ProgramGuide` responden `302` a
+  `validate.perfdrive.com` con `Server: rdwr`. Solo `robots.txt` y `sitemap.xml`
+  pasan. No es un bloqueo del endpoint JSON: es del host entero.
+- **El sitio nuevo también.** La guía migró a `directvla.com/cl`, que está detrás
+  del mismo WAF. El `baseUrl` del config apunta al host antiguo, pero da igual:
+  ambos bloquean.
+- **Suplantar el `User-Agent` no alcanza.** Con un UA de Chrome, `directvla.com`
+  sigue devolviendo el `302` al desafío. La vía barata no funciona.
+- **No hay tolerancia por sesión.** Tres peticiones con tarro de cookies limpio,
+  espaciadas: las tres bloqueadas. No existe un margen inicial que permita un
+  goteo lento y cortés.
+- **Los sitios hermanos no sirven.** `.com.ar`, `.com.co`, `.com.pe`, `.com.ec`
+  y `.com.uy` responden a las primeras peticiones y luego escalan al mismo
+  desafío. Y aunque quedaran abiertos, cada despliegue sirve la grilla de su
+  país: `PGCulture=es-CL` sobre el host argentino no cambia el catálogo.
+- **DGO queda fuera.** No es alcanzable desde aquí (`dgo.com` resuelve pero no
+  completa conexión, ni por cliente HTTP ni por navegador) y su guía vive tras
+  una suscripción, así que exigiría credenciales.
+
+La única forma conocida de entrar —la que usa `iptv-org`— es pedir primero la
+página HTML para cosechar las cookies `__uzm*` que emite Radware y reenviarlas
+en el POST junto a una huella de Chrome (`sec-ch-ua`, `uzlc: true`). Eso es
+evasión del control anti-bot, exactamente lo que este proyecto no hace, ni aquí
+ni en Zapping. Las rutas legítimas que quedan son pedir acceso a DirecTV/Vrio, o
+alimentar la guía por las vías que el panel ya ofrece: subir un XMLTV o registrar
+una guía remota por URL.
+
+Un hallazgo útil para el día que el acceso se abra: además del `GetProgramming`
+de `guia.aspx` que usa el adaptador —bloques de 3 horas para toda la grilla—
+existe `guia/ChannelDetail.aspx/GetProgramming`, que devuelve **un día completo
+de un solo canal en una sola petición**. Cambia el nombre del contenedor
+(`filterParameters`, no `filterParam`) y añade `isChannelDetails: "Y"`,
+`channelNum` y `channelName`, con `time: 0`. El parser de `iptv-org` lee
+`description` de ahí, así que quizá ese endpoint sí traiga la sinopsis que el de
+bloques deja siempre vacía. Sin acceso no se pudo verificar.
 
 **Zapping está deshabilitado por geobloqueo.** Responde 403 con el cuerpo
 `Acceso denegado: País no permitido` a toda IP fuera de Chile. No es anti-bot
