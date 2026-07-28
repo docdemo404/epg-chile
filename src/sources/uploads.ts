@@ -418,11 +418,15 @@ export async function assertSafeFeedUrl(raw: string): Promise<URL> {
 }
 
 /** Descarga y valida una guía remota sin darla de alta. */
-export async function fetchFeed(raw: string, label: string): Promise<ParsedFile> {
+export async function fetchFeed(
+  raw: string,
+  label: string,
+  opts: { timeoutMs?: number; retries?: number } = {},
+): Promise<ParsedFile> {
   const url = await assertSafeFeedUrl(raw);
   // Sin caché: el sentido de una URL es que su contenido cambie, y al darla de
   // alta se quiere ver lo que hay ahora, no lo que había hace una hora.
-  const text = await request('uploads', url.toString(), { noCache: true });
+  const text = await request('uploads', url.toString(), { noCache: true, ...opts });
   const parsed = parseText(text, label);
   if (!parsed.channels.length && !parsed.programmes.length) {
     throw new Error('La URL no devolvió canales ni programación');
@@ -432,6 +436,23 @@ export async function fetchFeed(raw: string, label: string): Promise<ParsedFile>
 
 export class UploadsSource implements EpgSource {
   readonly id = 'uploads';
+
+  /**
+   * Una ingesta llama a `fetchChannels` y después a `fetchProgrammes`, y ambas
+   * necesitan lo mismo: todos los archivos leídos y todas las guías por URL
+   * descargadas. Sin memorizar se hacía dos veces —dos descargas de cada guía
+   * remota y dos parseos de cada XMLTV—, que en un alta desde el panel era la
+   * diferencia entre caber en la función y no caber.
+   *
+   * La memoria vive en la instancia, y `createSource` devuelve una nueva por
+   * ingesta: no cachea entre refrescos, que es justo lo que no debe hacer.
+   */
+  #cache: Promise<ParsedFile> | null = null;
+
+  #all(): Promise<ParsedFile> {
+    this.#cache ??= this.#parseAll();
+    return this.#cache;
+  }
 
   async #parseAll(): Promise<ParsedFile> {
     const channels: RawChannel[] = [];
@@ -487,11 +508,11 @@ export class UploadsSource implements EpgSource {
   }
 
   async fetchChannels(): Promise<RawChannel[]> {
-    return (await this.#parseAll()).channels;
+    return (await this.#all()).channels;
   }
 
   async fetchProgrammes(range: FetchRange): Promise<RawProgramme[]> {
-    const { programmes } = await this.#parseAll();
+    const { programmes } = await this.#all();
     return programmes.filter((p) => p.stop > range.from && p.start < range.to);
   }
 }

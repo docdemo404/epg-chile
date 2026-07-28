@@ -34,6 +34,8 @@ export interface JobState {
 
 let current: JobState | null = null;
 let counter = 0;
+/** Ver `startRefresh`: un cambio en `uploads` llegado a destiempo no se pierde. */
+let uploadsPendiente = false;
 
 export function getJobState(): JobState | null {
   return current;
@@ -49,7 +51,15 @@ export function isRunning(): boolean {
  * reconstruir la guía.
  */
 export function startRefresh(sourceId?: string): JobState {
-  if (current?.running) return current;
+  if (current?.running) {
+    // Con `uploads` no basta con devolver el trabajo en curso. Detrás hay
+    // siempre un cambio que alguien acaba de hacer en el panel —añadir una
+    // guía por URL, quitarla, subir un archivo— y el refresco en marcha puede
+    // haber pasado ya por esa fuente, con lo que el cambio no se vería hasta
+    // el siguiente cron, seis horas después. Se encola para el final.
+    if (sourceId === 'uploads') uploadsPendiente = true;
+    return current;
+  }
 
   const ids = sourceId ? [sourceId] : enabledSources().map((s) => s.id);
   const state: JobState = {
@@ -83,6 +93,11 @@ export function startRefresh(sourceId?: string): JobState {
     } finally {
       state.running = false;
       state.finishedAt = Date.now();
+    }
+
+    if (uploadsPendiente) {
+      uploadsPendiente = false;
+      startRefresh('uploads');
     }
   })();
 

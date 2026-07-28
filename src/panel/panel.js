@@ -568,6 +568,49 @@ async function unifySelected() {
   }
 }
 
+// --------------------------------------------------- trabajos de fondo
+
+/**
+ * Sigue un trabajo de fondo hasta que termina.
+ *
+ * Añadir o quitar una guía ya no recalcula dentro de la petición: reingerir y
+ * refundir lleva minutos y la función se corta a los 60 s, así que el panel
+ * recibía un 504 aunque el cambio hubiera quedado guardado. Ahora la API
+ * responde en cuanto lo persiste y el trabajo real se mira desde aquí.
+ *
+ * Devuelve null si el estado se pierde por el camino. Pasa en serverless: cada
+ * petición puede caer en otro contenedor, y el que lleva el trabajo no es el
+ * que contesta. No es un fallo —el cambio está guardado y la ingesta de
+ * Actions lo recoge igual—, pero hay que decirlo en vez de fingir que terminó.
+ */
+async function seguirTrabajo(onTick = () => {}) {
+  // Tope de ~10 min: pasado eso, el panel no se queda colgado para siempre.
+  for (let i = 0; i < 300; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    let job;
+    try {
+      job = await api('/api/refresh/status');
+    } catch {
+      return null;
+    }
+    if (!job.steps.length) return null;
+    onTick(job);
+    if (!job.running) return job;
+  }
+  return null;
+}
+
+/** Mensaje y gravedad de un trabajo terminado, para el toast. */
+function resumenTrabajo(job, perdido) {
+  if (!job) return [perdido, true];
+  const fallidas = job.steps.filter((s) => s.status === 'error');
+  if (job.error) return [`El recálculo falló: ${job.error}`, true];
+  if (fallidas.length) {
+    return [`Con errores en: ${fallidas.map((s) => s.sourceId).join(', ')}`, true];
+  }
+  return [`Guía actualizada: ${job.result?.programmes ?? '?'} programas`, false];
+}
+
 // ------------------------------------------------------ guías propias
 
 async function loadUploads() {
@@ -608,7 +651,10 @@ async function loadUploads() {
       if (!confirm(`¿Quitar "${f.name}"? Sus datos dejarán de aparecer en la guía.`)) return;
       try {
         await api(`/api/uploads/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
-        toast('Archivo quitado');
+        toast('Archivo quitado; recalculando la guía…');
+        await loadUploads();
+        const job = await seguirTrabajo();
+        toast(...resumenTrabajo(job, 'Archivo quitado; desaparecerá en la próxima actualización'));
         await Promise.all([loadUploads(), loadChannels(), loadStats(), loadSources()]);
       } catch (err) {
         toast(err.message, true);
@@ -629,6 +675,9 @@ async function uploadFile(file) {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
     toast(`${body.upload.name}: ${body.upload.channels} canales, ${body.upload.programmes} progs`);
+    await loadUploads();
+    const job = await seguirTrabajo();
+    toast(...resumenTrabajo(job, 'Archivo guardado; aparecerá en la próxima actualización'));
     await Promise.all([loadUploads(), loadChannels(), loadStats(), loadSources()]);
   } catch (err) {
     toast(err.message, true);
@@ -707,6 +756,9 @@ async function loadFeeds() {
           body: JSON.stringify({ enabled: !f.enabled }),
         });
         toast(f.enabled ? 'Guía desactivada' : 'Guía activada');
+        await loadFeeds();
+        const job = await seguirTrabajo();
+        toast(...resumenTrabajo(job, 'Hecho; se aplicará en la próxima actualización'));
         await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
       } catch (err) {
         toast(err.message, true);
@@ -721,7 +773,10 @@ async function loadFeeds() {
       if (!confirm(`¿Quitar "${f.label}"? Sus datos dejarán de aparecer en la guía.`)) return;
       try {
         await api(`/api/feeds/${f.id}`, { method: 'DELETE' });
-        toast('Guía quitada');
+        toast('Guía quitada; recalculando…');
+        await loadFeeds();
+        const job = await seguirTrabajo();
+        toast(...resumenTrabajo(job, 'Guía quitada; desaparecerá en la próxima actualización'));
         await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
       } catch (err) {
         toast(err.message, true);
@@ -743,14 +798,21 @@ async function addFeed() {
   btn.disabled = true;
   btn.textContent = 'Comprobando…';
   try {
+    // Esta llamada solo descarga la URL, la valida y la registra: vuelve en
+    // segundos. Incorporarla a la guía es el trabajo de fondo que se sigue
+    // debajo, y por eso el botón cambia de texto en vez de esperar callado.
     const body = await api('/api/feeds', {
       method: 'POST',
       body: JSON.stringify({ url, label: labelInput.value.trim() || undefined }),
     });
-    if (body.warning) toast(body.warning, true);
-    else toast(`${body.feed.label}: ${body.feed.channels} canales, ${body.feed.programmes} progs`);
+    toast(`${body.feed.label}: ${body.feed.channels} canales, ${body.feed.programmes} progs`);
     urlInput.value = '';
     labelInput.value = '';
+    await loadFeeds();
+
+    btn.textContent = 'Incorporando…';
+    const job = await seguirTrabajo();
+    toast(...resumenTrabajo(job, 'Guía añadida; aparecerá en la próxima actualización'));
     await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
   } catch (err) {
     toast(err.message, true);
@@ -861,31 +923,14 @@ $('#btn-refresh').addEventListener('click', async (ev) => {
   }
 
   // El POST vuelve al instante; el progreso real se consulta aparte.
-  while (true) {
-    await new Promise((r) => setTimeout(r, 2000));
-    let job;
-    try {
-      job = await api('/api/refresh/status');
-    } catch {
-      break;
-    }
-    const done = job.steps.filter((s) => s.status === 'ok' || s.status === 'error').length;
-    const current = job.steps.find((s) => s.status === 'en curso');
-    btn.textContent = current
-      ? `${current.sourceId}… (${done}/${job.steps.length})`
-      : `Actualizando… (${done}/${job.steps.length})`;
-
-    if (!job.running) {
-      const failed = job.steps.filter((s) => s.status === 'error');
-      toast(
-        failed.length
-          ? `Terminado, con ${failed.length} fuente(s) en error: ${failed.map((f) => f.sourceId).join(', ')}`
-          : `Guía actualizada: ${job.result?.programmes ?? '?'} programas`,
-        failed.length > 0,
-      );
-      break;
-    }
-  }
+  const job = await seguirTrabajo((j) => {
+    const hechas = j.steps.filter((s) => s.status === 'ok' || s.status === 'error').length;
+    const actual = j.steps.find((s) => s.status === 'en curso');
+    btn.textContent = actual
+      ? `${actual.sourceId}… (${hechas}/${j.steps.length})`
+      : `Actualizando… (${hechas}/${j.steps.length})`;
+  });
+  toast(...resumenTrabajo(job, 'No se pudo seguir el progreso; la actualización continúa'));
 
   await Promise.all([loadChannels(), loadStats(), loadSources(), loadUploads()]);
   btn.disabled = false;

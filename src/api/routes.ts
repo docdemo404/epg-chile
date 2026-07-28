@@ -3,8 +3,8 @@ import { DateTime } from 'luxon';
 import { loadAliases, loadConfig, saveAliases, type AliasEntry } from '../core/config.ts';
 import { slugify } from '../core/normalize.ts';
 import { guideEtag } from '../core/version.ts';
-import { defaultRange, ingestSource, rebuildChannels, rebuildMerge } from '../core/pipeline.ts';
-import { getJobState, isRunning, startRefresh } from '../core/jobs.ts';
+import { defaultRange, rebuildChannels, rebuildMerge } from '../core/pipeline.ts';
+import { getJobState, isRunning, startRefresh, type JobState } from '../core/jobs.ts';
 import { isEphemeral } from '../db/client.ts';
 import { fetchFeed, isSupportedUpload, listUploads, parseBuffer } from '../sources/uploads.ts';
 import { deleteFile, fileExists, safeName, storageKind, writeFile } from '../core/storage.ts';
@@ -31,6 +31,43 @@ import {
 } from '../db/repo.ts';
 
 const FORMATS: ExportFormat[] = ['json', 'xml', 'xml.gz'];
+
+/**
+ * Paciencia al descargar una guía remota mientras alguien espera al otro lado.
+ *
+ * Los valores de `sources.yaml` (30 s por intento y 3 reintentos con backoff)
+ * suman más de dos minutos en el peor caso, por encima de los 60 s que dura una
+ * función en Vercel: una URL lenta o caída no daba un error legible, daba un
+ * 504 del gateway. Con esto lo peor que puede pasar son ~25 s y un mensaje que
+ * explica qué falló. La ingesta de fondo sigue usando la paciencia larga, que
+ * ahí sí sobra el tiempo.
+ */
+const PACIENCIA_PANEL = { timeoutMs: 12_000, retries: 1 };
+
+/**
+ * Deja en marcha la reconstrucción que exige cualquier cambio en las guías
+ * —alta o baja de una URL, activarla, subir o borrar un archivo— y describe
+ * qué va a pasar, sin esperarla.
+ *
+ * No se espera porque no cabe: reingerir `uploads` vuelve a descargar cada
+ * guía remota, reescribe la capa cruda en Turso y refunde la ventana entera.
+ * Son minutos contra los 60 s de la función, así que hacerlo dentro de la
+ * petición terminaba siempre en 504 —y encima confundía, porque el cambio sí
+ * había quedado guardado—. Ahora la petición responde en cuanto el cambio está
+ * persistido y el trabajo se sigue por `/api/refresh/status`.
+ *
+ * Si el contenedor se congela antes de terminar, no se pierde nada: la ingesta
+ * de GitHub Actions parte de lo persistido y recoge el cambio igual.
+ */
+function incorporar(): { job: JobState; note: string } {
+  const enCurso = isRunning();
+  return {
+    job: startRefresh('uploads'),
+    note: enCurso
+      ? 'Ya había una actualización en curso: la guía se recalculará al terminar.'
+      : 'Incorporando a la guía…',
+  };
+}
 
 function parseTime(value: unknown, fallback: number): number {
   if (typeof value !== 'string' || !value) return fallback;
@@ -422,10 +459,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
       programmes: parsed.programmes.length,
     };
 
-    await ingestSource('uploads');
-    await rebuildChannels();
-    const merge = await rebuildMerge();
-    return { upload: info, programmes: merge.output };
+    return reply.code(202).send({ upload: info, ...incorporar() });
   });
 
   app.delete('/api/uploads/:name', async (req, reply) => {
@@ -433,10 +467,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const safe = safeName(name);
     if (!(await fileExists(safe))) return reply.code(404).send({ error: 'No existe ese archivo' });
     await deleteFile(safe);
-    await ingestSource('uploads');
-    await rebuildChannels();
-    await rebuildMerge();
-    return { deleted: safe };
+    return reply.code(202).send({ deleted: safe, ...incorporar() });
   });
 
   // -------------------------------------------------------- guías por URL
@@ -471,46 +502,27 @@ export function registerApiRoutes(app: FastifyInstance): void {
 
     let parsed;
     try {
-      parsed = await fetchFeed(url, label);
+      parsed = await fetchFeed(url, label, PACIENCIA_PANEL);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: msg });
     }
 
-    // El alta se persiste ANTES de recalcular, y el orden importa: incorporar
-    // una guía grande puede pasarse de los 60 s de una función en Vercel. Si
-    // eso ocurre la petición muere, pero la URL ya quedó dada de alta y la
-    // siguiente ingesta —la de Actions, sin límite de tiempo— la recoge sola.
-    // Al revés, un corte dejaría la guía descargada y no registrada.
+    // El alta se persiste ANTES de tocar la guía: un corte entre una cosa y la
+    // otra debe dejar la URL registrada y la guía intacta, nunca al revés.
     const feed = await addFeedUrl(url, label, {
       channels: parsed.channels.length,
       programmes: parsed.programmes.length,
     });
 
-    try {
-      await ingestSource('uploads');
-      await rebuildChannels();
-      const merge = await rebuildMerge();
-      return { feed, programmes: merge.output };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        feed,
-        warning:
-          `La guía quedó añadida, pero el recálculo falló (${msg}). ` +
-          'Aparecerá en la próxima actualización.',
-      };
-    }
+    return reply.code(202).send({ feed, ...incorporar() });
   });
 
   app.delete('/api/feeds/:id', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'Id inválido' });
     if (!(await deleteFeedUrl(id))) return reply.code(404).send({ error: 'No existe esa guía' });
-    await ingestSource('uploads');
-    await rebuildChannels();
-    await rebuildMerge();
-    return { deleted: id };
+    return reply.code(202).send({ deleted: id, ...incorporar() });
   });
 
   /** Activa o desactiva una guía sin perder la URL ni su historial. */
@@ -524,10 +536,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     if (!(await setFeedUrlEnabled(id, enabled))) {
       return reply.code(404).send({ error: 'No existe esa guía' });
     }
-    await ingestSource('uploads');
-    await rebuildChannels();
-    await rebuildMerge();
-    return { feed: await getFeedUrl(id) };
+    return reply.code(202).send({ feed: await getFeedUrl(id), ...incorporar() });
   });
 
   // ------------------------------------------------- unificación manual

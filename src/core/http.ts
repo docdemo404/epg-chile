@@ -66,6 +66,17 @@ export interface RequestOptions {
   noCache?: boolean;
   /** TTL propio en minutos; por defecto usa http.cacheTtlMinutes. */
   cacheTtlMinutes?: number;
+  /**
+   * Paciencia propia para esta llamada, en vez de la de `http:` en sources.yaml.
+   *
+   * Los valores por defecto (30 s por intento, 3 reintentos con backoff) están
+   * pensados para la ingesta de Actions, donde hay horas: una fuente lenta se
+   * espera antes que perderla. Dentro de una petición del panel esa misma
+   * paciencia suma más de dos minutos y se lleva por delante el límite de la
+   * función, así que quien responde a una persona baja ambos.
+   */
+  timeoutMs?: number;
+  retries?: number;
 }
 
 function cachePath(key: string): string {
@@ -117,6 +128,8 @@ export async function request(
   const method = opts.method ?? 'GET';
   const cacheKey = `${method} ${url} ${opts.body ? JSON.stringify(opts.body) : ''}`;
   const ttl = opts.cacheTtlMinutes ?? cfg.http.cacheTtlMinutes;
+  const timeoutMs = opts.timeoutMs ?? cfg.http.timeoutMs;
+  const retries = opts.retries ?? cfg.http.retries;
 
   if (!opts.noCache && ttl > 0) {
     const hit = readCache(cacheKey, ttl);
@@ -126,11 +139,11 @@ export async function request(
   const limiter = limiterFor(sourceId, rate);
   let lastError: unknown;
 
-  for (let attempt = 0; attempt <= cfg.http.retries; attempt++) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
     await limiter.acquire();
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), cfg.http.timeoutMs);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch(url, {
           method,
@@ -165,7 +178,7 @@ export async function request(
       if (err instanceof HttpError && err.status >= 400 && err.status < 500 && err.status !== 429) {
         throw err;
       }
-      if (attempt < cfg.http.retries) {
+      if (attempt < retries) {
         await sleep(cfg.http.backoffBaseMs * 2 ** attempt);
       }
     } finally {

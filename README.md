@@ -489,6 +489,16 @@ npm test
 | `PATCH /api/feeds/{id}` | Activar o desactivar (`{"enabled":false}`) |
 | `DELETE /api/feeds/{id}` | Quitar una guía remota |
 
+Todo lo que toca las guías propias —subir o quitar un archivo, añadir, activar
+o quitar una URL— responde **202** en cuanto el cambio queda guardado, y deja
+el recálculo en segundo plano; su progreso se consulta en
+`GET /api/refresh/status`. No es un detalle de estilo: reingerir `uploads`
+vuelve a descargar cada guía remota, reescribe la capa cruda y refunde la
+ventana entera, minutos de trabajo contra los 60 s que dura una función en
+Vercel. Hacerlo dentro de la petición terminaba en un 504 del gateway aunque el
+cambio sí hubiera quedado guardado. Si el contenedor se congela antes de
+terminar tampoco se pierde: la ingesta de Actions parte de lo persistido.
+
 ## Añadir una fuente
 
 1. Implementar `EpgSource` en `src/sources/` (`fetchChannels`, `fetchProgrammes`).
