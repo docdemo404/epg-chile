@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio';
 import { getSourceConfig } from '../core/config.ts';
 import { request } from '../core/http.ts';
-import { preferHttps } from '../core/normalize.ts';
+import { isFallbackImage, preferHttps } from '../core/normalize.ts';
 import type { EpgSource, FetchRange, ImageRef, RawChannel, RawProgramme } from '../core/types.ts';
 
 /**
@@ -150,7 +150,7 @@ export class ZappingSource implements EpgSource {
       if (stop <= range.from || start >= range.to) continue;
 
       const images: ImageRef[] = [];
-      if (l.image) {
+      if (l.image && !isFallbackImage(l.image)) {
         // El CDN acepta el alto por querystring; se pide la variante grande.
         images.push({ url: upscale(l.image), kind: 'videoFrame' });
       }

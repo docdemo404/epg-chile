@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import { getSourceConfig, loadConfig } from '../core/config.ts';
 import { requestJson } from '../core/http.ts';
-import { parseDirectvDateTime, preferHttps } from '../core/normalize.ts';
+import { isFallbackImage, parseDirectvDateTime, preferHttps } from '../core/normalize.ts';
 import type { EpgSource, FetchRange, ImageRef, RawChannel, RawProgramme } from '../core/types.ts';
 
 /**
@@ -163,7 +163,10 @@ export class DirectvSource implements EpgSource {
       const key = String(contentId);
       if (seen.has(key)) continue;
       const name = (ch.ChannelName ?? ch.ChannelFullName ?? key).trim();
-      const logos: ImageRef[] = ch.ImageUrl ? [{ url: preferHttps(ch.ImageUrl), kind: 'logo' }] : [];
+      const logos: ImageRef[] =
+        ch.ImageUrl && !isFallbackImage(ch.ImageUrl)
+          ? [{ url: preferHttps(ch.ImageUrl), kind: 'logo' }]
+          : [];
       seen.set(key, {
         sourceId: this.id,
         sourceChannelId: key,
@@ -217,7 +220,7 @@ export class DirectvSource implements EpgSource {
     const stop = parseDirectvDateTime(p.endTimeString, zone);
     if (start === null || stop === null || stop <= start) return null;
 
-    const images: ImageRef[] = p.imageUrl
+    const images: ImageRef[] = p.imageUrl && !isFallbackImage(p.imageUrl)
       ? [{ url: preferHttps(p.imageUrl), kind: 'poster' }]
       : [];
 

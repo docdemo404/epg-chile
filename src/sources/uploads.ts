@@ -7,7 +7,7 @@ import { loadConfig } from '../core/config.ts';
 import { listFiles, readFile } from '../core/storage.ts';
 import { request } from '../core/http.ts';
 import { listFeedUrls, setFeedUrlStatus } from '../db/repo.ts';
-import { preferHttps } from '../core/normalize.ts';
+import { dropFallbackImages, isFallbackImage, preferHttps } from '../core/normalize.ts';
 import type {
   Credits,
   EpgSource,
@@ -122,7 +122,7 @@ function parseXmltv(xml: string, sourceId: string, label: string, zone: string):
 
     const logos: ImageRef[] = [];
     const icon = $el.find('icon').first().attr('src');
-    if (icon) logos.push({ url: preferHttps(icon), kind: 'logo' });
+    if (icon && !isFallbackImage(icon)) logos.push({ url: preferHttps(icon), kind: 'logo' });
 
     channels.push({
       sourceId,
@@ -158,7 +158,7 @@ function parseXmltv(xml: string, sourceId: string, label: string, zone: string):
     const images: ImageRef[] = [];
     $el.find('icon').each((__, i) => {
       const src = $(i).attr('src');
-      if (src) images.push({ url: preferHttps(src), kind: 'poster' });
+      if (src && !isFallbackImage(src)) images.push({ url: preferHttps(src), kind: 'poster' });
     });
 
     const actors: string[] = [];
@@ -237,7 +237,7 @@ function parseJson(text: string, sourceId: string, label: string): ParsedFile {
     sourceChannelId: c.id,
     name: c.name || c.id,
     number: c.numbers ? Object.values(c.numbers)[0] : undefined,
-    logos: c.logos ?? [],
+    logos: dropFallbackImages(c.logos ?? []),
     raw: { file: label },
   }));
 
@@ -258,7 +258,7 @@ function parseJson(text: string, sourceId: string, label: string): ParsedFile {
       subTitle: p.subTitle,
       desc: p.desc,
       categories: p.categories ?? [],
-      images: p.images ?? [],
+      images: dropFallbackImages(p.images ?? []),
       credits: p.credits,
       rating: p.rating,
       episode: p.episode,

@@ -195,3 +195,21 @@ export function isPresent(value: unknown): boolean {
 export function preferHttps(url: string): string {
   return url.startsWith('http://') ? `https://${url.slice(7)}` : url;
 }
+
+/**
+ * Las fuentes tapan el hueco con una imagen genérica cuando no tienen arte del
+ * programa, y la delatan en la propia URL ("fallback_movie.png",
+ * "/assets/fallback.jpg"). No ilustran nada, y colarlas es peor que no traer
+ * imagen: el merge las da por buenas y el programa se queda sin la imagen real
+ * que sí tenía otra fuente. Cualquier URL que mencione "fallback" se descarta.
+ */
+const FALLBACK_IMAGE = /fallback/i;
+
+export function isFallbackImage(url: string | null | undefined): boolean {
+  return typeof url === 'string' && FALLBACK_IMAGE.test(url);
+}
+
+/** Quita las imágenes de relleno de una lista; ver `isFallbackImage`. */
+export function dropFallbackImages<T extends { url?: string }>(images: T[]): T[] {
+  return images.filter((i) => !isFallbackImage(i?.url));
+}

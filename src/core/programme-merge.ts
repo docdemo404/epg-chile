@@ -1,5 +1,11 @@
 import { loadConfig } from './config.ts';
-import { diceCoefficient, isPresent, largestImage, normalizeTitle } from './normalize.ts';
+import {
+  diceCoefficient,
+  isFallbackImage,
+  isPresent,
+  largestImage,
+  normalizeTitle,
+} from './normalize.ts';
 import type {
   Credits,
   EpisodeRef,
@@ -431,7 +437,13 @@ function mergeImages(
   stats: MergeStats,
   anchorSource: string,
 ): ImageRef[] {
-  const all = group.flatMap((p) => (p.images ?? []).map((img) => ({ img, sourceId: p.sourceId })));
+  // El filtro se repite aquí y en los adaptadores a propósito: la capa cruda
+  // guarda lo que se ingirió antes de que existiera este descarte, y solo se
+  // reescribe cuando la fuente vuelve a pasar. Filtrar en el merge limpia
+  // también esa cola sin esperar a la siguiente ingesta.
+  const all = group
+    .flatMap((p) => (p.images ?? []).map((img) => ({ img, sourceId: p.sourceId })))
+    .filter((e) => !isFallbackImage(e.img?.url));
   if (!all.length) return [];
 
   const out: ImageRef[] = [];

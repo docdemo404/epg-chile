@@ -1,5 +1,6 @@
 import type { InValue } from '@libsql/client';
 import { loadConfig } from '../core/config.ts';
+import { dropFallbackImages } from '../core/normalize.ts';
 import { all, atomic, batch, ensureSchema, get, run } from './client.ts';
 import type {
   Channel,
@@ -291,7 +292,9 @@ export async function getChannels(): Promise<ChannelWithLinks[]> {
       canonicalName: String(c.canonical_name),
       altNames: parse<string[]>(c.alt_names_json, []),
       numbers,
-      logos: parse<ImageRef[]>(c.logos_json, []),
+      // Filtrado también al leer: las filas guardadas antes de este descarte
+      // solo se reescriben cuando vuelve a correr la unificación.
+      logos: dropFallbackImages(parse<ImageRef[]>(c.logos_json, [])),
       sources: [...new Set(ls.map((l) => String(l.source_id)))],
       links: ls.map((l) => ({
         sourceId: String(l.source_id),
@@ -392,7 +395,8 @@ export async function getMergedProgrammes(opts: {
     subTitle: str(r.sub_title),
     desc: str(r.desc),
     categories: parse<string[]>(r.categories_json, []),
-    images: parse<ImageRef[]>(r.images_json, []),
+    // Igual que con los logos: limpia lo fusionado antes de existir el descarte.
+    images: dropFallbackImages(parse<ImageRef[]>(r.images_json, [])),
     credits: r.credits_json ? parse<Credits | undefined>(r.credits_json, undefined) : undefined,
     rating: str(r.rating),
     episode: r.episode_json ? parse<EpisodeRef | undefined>(r.episode_json, undefined) : undefined,

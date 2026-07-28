@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { DateTime } from 'luxon';
 import {
   diceCoefficient,
+  dropFallbackImages,
+  isFallbackImage,
   isPresent,
   largestImage,
   normalizeChannelName,
@@ -75,4 +77,24 @@ test('largestImage elige la de mayor superficie', () => {
     { url: 'b', kind: 'poster', width: 1920, height: 1080 },
   ]);
   assert.equal(best?.url, 'b');
+});
+
+test('isFallbackImage descarta cualquier URL que mencione fallback', () => {
+  // Las fuentes lo escriben de formas distintas; basta con que aparezca.
+  assert.equal(isFallbackImage('https://cdn.mi.tv/fallback_movie.png'), true);
+  assert.equal(isFallbackImage('https://cdn.tv/img/fallback.jpg'), true);
+  assert.equal(isFallbackImage('https://cdn.tv/Fallback/poster.jpg'), true);
+  assert.equal(isFallbackImage('https://cdn.tv/p.jpg?src=fallback'), true);
+  assert.equal(isFallbackImage('https://cdn.tv/programas/pampa-ilusion.jpg'), false);
+  assert.equal(isFallbackImage(undefined), false);
+});
+
+test('dropFallbackImages deja la lista sin imágenes de relleno', () => {
+  // Sin este filtro el relleno gana el hueco en el merge y el programa se
+  // queda sin la imagen real que sí traía otra fuente.
+  const out = dropFallbackImages([
+    { url: 'https://cdn.tv/fallback_serie.png', kind: 'poster' as const },
+    { url: 'https://cdn.tv/real.jpg', kind: 'poster' as const },
+  ]);
+  assert.deepEqual(out.map((i) => i.url), ['https://cdn.tv/real.jpg']);
 });

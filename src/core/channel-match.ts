@@ -1,5 +1,11 @@
 import { loadAliases, loadConfig } from './config.ts';
-import { channelMatchKey, diceCoefficient, normalizeChannelName, slugify } from './normalize.ts';
+import {
+  channelMatchKey,
+  diceCoefficient,
+  isFallbackImage,
+  normalizeChannelName,
+  slugify,
+} from './normalize.ts';
 import type { ImageRef, RawChannel } from './types.ts';
 
 /**
@@ -336,7 +342,7 @@ function dedupeLogos(logos: ImageRef[]): ImageRef[] {
   const seen = new Set<string>();
   const out: ImageRef[] = [];
   for (const l of logos) {
-    if (!l?.url || seen.has(l.url)) continue;
+    if (!l?.url || seen.has(l.url) || isFallbackImage(l.url)) continue;
     seen.add(l.url);
     out.push(l);
   }

@@ -1,6 +1,6 @@
 import { getSourceConfig } from '../core/config.ts';
 import { requestJson } from '../core/http.ts';
-import { preferHttps } from '../core/normalize.ts';
+import { isFallbackImage, preferHttps } from '../core/normalize.ts';
 import { getDictionary, saveDictionary } from '../db/repo.ts';
 import type { EpgSource, FetchRange, ImageRef, RawChannel, RawProgramme } from '../core/types.ts';
 
@@ -85,7 +85,7 @@ function unwrapList<T>(env: CaEnvelope<T>): T[] {
 
 function toImages(list: CaImage[] | undefined, kind: ImageRef['kind']): ImageRef[] {
   return (list ?? [])
-    .filter((i) => i.Url)
+    .filter((i) => i.Url && !isFallbackImage(i.Url))
     .map((i) => ({
       url: preferHttps(i.Url),
       kind,

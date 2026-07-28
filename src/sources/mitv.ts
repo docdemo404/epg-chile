@@ -2,7 +2,7 @@ import * as cheerio from 'cheerio';
 import { DateTime } from 'luxon';
 import { getSourceConfig, loadConfig } from '../core/config.ts';
 import { request } from '../core/http.ts';
-import { preferHttps } from '../core/normalize.ts';
+import { isFallbackImage, preferHttps } from '../core/normalize.ts';
 import type { EpgSource, FetchRange, ImageRef, RawChannel, RawProgramme } from '../core/types.ts';
 
 /**
@@ -25,8 +25,6 @@ interface MitvListing {
   image?: string;
   href?: string;
 }
-
-const FALLBACK_IMAGE = /fallback_/i;
 
 /**
  * Separa el campo `.sub-title` de mi.tv en sus tres posibles contenidos.
@@ -161,7 +159,10 @@ export class MitvSource implements EpgSource {
     if (!listings.length) return [];
 
     const channelLogo = $('.channel-info img').first().attr('src');
-    const logos: ImageRef[] = channelLogo ? [{ url: preferHttps(channelLogo), kind: 'logo' }] : [];
+    const logos: ImageRef[] =
+      channelLogo && !isFallbackImage(channelLogo)
+        ? [{ url: preferHttps(channelLogo), kind: 'logo' }]
+        : [];
 
     return this.#toProgrammes(listings, slug, day, zone, logos);
   }
@@ -210,7 +211,7 @@ export class MitvSource implements EpgSource {
       const stop = next && next > start ? next : start.plus({ hours: 1 });
 
       const images: ImageRef[] = [];
-      if (l.image && !FALLBACK_IMAGE.test(l.image)) {
+      if (l.image && !isFallbackImage(l.image)) {
         images.push({ url: preferHttps(l.image), kind: 'poster' });
       }
 
