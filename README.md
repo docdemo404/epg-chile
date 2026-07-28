@@ -88,16 +88,16 @@ vercel deploy --prod --prebuilt --archive=tgz
 
 ### Despliegue continuo
 
-Hay dos formas y no son equivalentes. La recomendada es **conectar el
-repositorio desde el panel de Vercel**: no hay ninguna credencial que guardar,
-rotar ni filtrar, y eso pesa especialmente en un repositorio público. Un token
-de Vercel puede leer las variables de entorno de la cuenta —o sea,
-`TURSO_AUTH_TOKEN` y `BLOB_READ_WRITE_TOKEN`—, así que guardarlo en los
-secrets equivale a dejar ahí la llave de todo el stack.
+**El repositorio está conectado al proyecto de Vercel**, así que cada push a
+`main` despliega solo. Es la forma elegida a propósito frente a desplegar desde
+Actions: no hay ninguna credencial que guardar, rotar ni filtrar, y eso pesa
+especialmente en un repositorio público. Un token de Vercel puede leer las
+variables de entorno de la cuenta —o sea, `TURSO_AUTH_TOKEN` y
+`BLOB_READ_WRITE_TOKEN`—, así que guardarlo en los secrets equivale a dejar
+ahí la llave de todo el stack.
 
-Se activa en dos pasos, ambos en el navegador: añadir GitHub en
-<https://vercel.com/account/login-connections> y conectar el repositorio en los
-ajustes Git del proyecto. A partir de ahí, cada push a `main` despliega solo.
+En este modo Vercel compila por su cuenta ejecutando el `buildCommand` de
+`vercel.json`, que emite el Build Output igual que en local.
 
 Su punto flaco es que Vercel publica **sin comprobar nada**. Por eso
 `.github/workflows/deploy.yml` verifica tipos y pruebas en cada push aunque el
