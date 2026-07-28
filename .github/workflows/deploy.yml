@@ -95,7 +95,7 @@ jobs:
 
       # Se construye AQUÍ y se sube con `--prebuilt` en vez de dejar que Vercel
       # compile, por el mismo motivo por el que existe build-vercel.mjs: el
-      # builder de Vercel no arrastra `src/` al transpilar api/index.ts.
+      # builder de Vercel no arrastra `src/` al transpilar el entrypoint.
       - name: Construir el Build Output
         if: steps.guard.outputs.listo == 'si'
         run: npm run build

@@ -8,15 +8,19 @@ import { fileURLToPath } from 'node:url';
  *
  * Se llegó aquí descartando dos caminos que no funcionan:
  *
- *  1. Dejar que Vercel compile `api/index.ts` por su cuenta: transpila el
- *     archivo pero deja intactos los especificadores `../src/app.ts` y no
- *     arrastra `src/`, así que cada petición moría con ERR_MODULE_NOT_FOUND.
- *  2. Generar el bundle en `api/index.js` y declararlo en `functions`: Vercel
- *     valida ese patrón ANTES de ejecutar el build, cuando el archivo todavía
- *     no existe.
+ *  1. Dejar que Vercel compile el entrypoint por su cuenta: transpila el
+ *     archivo pero deja intactos los especificadores `./app.ts` y no arrastra
+ *     `src/`, así que cada petición moría con ERR_MODULE_NOT_FOUND.
+ *  2. Generar el bundle y declararlo en `functions`: Vercel valida ese patrón
+ *     ANTES de ejecutar el build, cuando el archivo todavía no existe.
  *
  * El Build Output API evita ambos problemas: se emite directamente la
  * estructura final que Vercel despliega, sin que tenga que adivinar nada.
+ *
+ * Por eso el entrypoint vive en `src/vercel-entry.ts` y no en `api/`: ese
+ * directorio es una convención que Vercel construye por su cuenta *además* de
+ * este Build Output. Desplegando con `--prebuilt` daba igual —esa fase se
+ * salta—, pero con el repositorio conectado a Git rompía el despliegue.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +32,7 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(fn, { recursive: true });
 
 await build({
-  entryPoints: [join(root, 'api', 'index.ts')],
+  entryPoints: [join(root, 'src', 'vercel-entry.ts')],
   outfile: join(fn, 'index.js'),
   bundle: true,
   platform: 'node',

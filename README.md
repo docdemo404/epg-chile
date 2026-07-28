@@ -125,9 +125,15 @@ guía vacía por falta de configuración no debe parecer un fallo del agregador.
 
 Están resueltos en `scripts/build-vercel.mjs`, pero conviene saber por qué:
 
-- **El builder de Vercel no sirve aquí.** Transpila `api/index.ts` pero deja
-  intactos los especificadores `../src/app.ts` y no arrastra `src/`, así que
-  cada petición moría con `ERR_MODULE_NOT_FOUND`. Se empaqueta con esbuild.
+- **El builder de Vercel no sirve aquí.** Transpila el entrypoint pero deja
+  intactos los especificadores `./app.ts` y no arrastra `src/`, así que cada
+  petición moría con `ERR_MODULE_NOT_FOUND`. Se empaqueta con esbuild.
+- **El entrypoint NO puede vivir en `api/`.** Ese directorio es una convención
+  y Vercel construye lo que encuentre ahí *además* del Build Output que emite
+  este proyecto, pisando el enrutado. Desplegando con `--prebuilt` no se nota,
+  porque esa fase se salta; al conectar el repositorio a Git salió a la luz de
+  golpe: la primera compilación hecha por Vercel dejó **404 en toda la API y
+  500 en el panel**. Por eso está en `src/vercel-entry.ts`.
 - **`functions` se valida antes del build**, así que no se puede declarar un
   archivo que genera el propio build. Por eso se emite directamente
   `.vercel/output` con el Build Output API.

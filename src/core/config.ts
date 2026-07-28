@@ -9,7 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url));
  * Localiza la raíz del proyecto.
  *
  * No basta con subir dos niveles desde este archivo: al empaquetar para
- * Vercel todo el código colapsa en `api/index.js`, y esa ruta relativa
+ * Vercel todo el código colapsa en un único `index.js`, y esa ruta relativa
  * apuntaría fuera del proyecto. Se prueban los candidatos y gana el primero
  * que realmente contenga la configuración.
  */
@@ -17,7 +17,7 @@ function findRoot(): string {
   const candidates = [
     join(here, '..', '..'), // src/core/config.ts en desarrollo
     process.cwd(), // raíz del bundle en Vercel (/var/task)
-    join(here, '..'), // api/index.js empaquetado
+    join(here, '..'), // el bundle empaquetado, junto a su `config/`
   ];
   for (const c of candidates) {
     if (existsSync(join(c, 'config', 'sources.yaml'))) return c;

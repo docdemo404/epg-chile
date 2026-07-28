@@ -5,7 +5,7 @@ import { startScheduler } from './scheduler.ts';
 /**
  * Servidor local y para contenedores.
  *
- * En Vercel no se usa este archivo: allí el entrypoint es `api/index.ts`, que
+ * En Vercel no se usa este archivo: allí el entrypoint es `src/vercel-entry.ts`, que
  * envuelve la misma app sin escuchar en un puerto ni arrancar el scheduler
  * (en serverless no hay proceso vivo donde un cron interno pueda correr; de
  * eso se encarga GitHub Actions).

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FastifyInstance } from 'fastify';
-import { buildApp } from '../src/app.ts';
+import { buildApp } from './app.ts';
 
 /**
  * Entrypoint serverless de Vercel.
@@ -11,6 +11,14 @@ import { buildApp } from '../src/app.ts';
  *
  * No arranca el scheduler: en serverless no hay proceso vivo entre peticiones
  * donde un cron interno pueda correr. La ingesta la dispara GitHub Actions.
+ *
+ * Vive en `src/` y NO en un directorio `api/`, y eso es deliberado: Vercel
+ * trata `api/` como convención y construye lo que encuentre ahí por su cuenta,
+ * *además* del Build Output que emite este proyecto. Con el repositorio
+ * conectado a Git eso rompía el despliegue —transpilaba este archivo sin
+ * arrastrar `src/` y pisaba el enrutado, dejando 404 en la API y 500 en el
+ * panel—. Con el entrypoint fuera de `api/` no hay nada que autodetectar y
+ * manda solo `.vercel/output`.
  */
 
 let appPromise: Promise<FastifyInstance> | null = null;
