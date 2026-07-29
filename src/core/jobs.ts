@@ -41,6 +41,23 @@ export function getJobState(): JobState | null {
   return current;
 }
 
+/**
+ * Si este proceso puede reconstruir la guía, o solo puede pedirlo.
+ *
+ * En una función de Vercel no puede, y no es cuestión de afinar: está medido
+ * en `client.ts` que un lote de 200 sentencias contra Turso tarda unos 3 s, y
+ * una reingesta de `uploads` escribe ~61.000 programas y la fusión reescribe
+ * ~100.000 filas. Son decenas de minutos contra un techo de 60 s.
+ *
+ * Arrancarlo allí no es "que quizá no termine": `replaceChannels` vacía
+ * `channel_links` para volver a llenarla, y una función cortada a mitad dejaba
+ * la guía entera sin un solo vínculo entre canal y fuente. Pasó en producción.
+ * Aquí el trabajo pesado es de GitHub Actions, que tiene horas.
+ */
+export function puedeReconstruir(): boolean {
+  return !process.env.VERCEL;
+}
+
 export function isRunning(): boolean {
   return current?.running === true;
 }

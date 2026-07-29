@@ -212,35 +212,42 @@ export async function replaceChannels(
   await initDb();
   const now = Date.now();
 
-  // Los ids se conservan entre recálculos reusándolos por `xmltv_id`. Borrar
-  // e insertar de nuevo los renumeraría en cada refresco y dejaría sin efecto
-  // los enlaces permanentes ya creados.
+  // Un lote de upserts en vez de una ida y vuelta por canal.
+  //
+  // Antes esto era un INSERT o un UPDATE suelto por canal, con su viaje de red
+  // cada uno: mil canales contra Turso pasaban del minuto. Es el paso que hizo
+  // que reconstruir desde una función de Vercel no terminara nunca, y con el
+  // borrado de vínculos ya hecho la guía se quedaba sin ninguno.
+  //
+  // Los ids se conservan entre recálculos gracias al `ON CONFLICT(xmltv_id)`:
+  // borrar e insertar de nuevo los renumeraría en cada refresco y dejaría sin
+  // efecto los enlaces permanentes ya publicados.
+  await batch(
+    channels.map((c) => ({
+      sql: `INSERT INTO channels (xmltv_id, canonical_name, alt_names_json, logos_json, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(xmltv_id) DO UPDATE SET
+              canonical_name = excluded.canonical_name,
+              alt_names_json = excluded.alt_names_json,
+              logos_json = excluded.logos_json,
+              updated_at = excluded.updated_at`,
+      args: [c.xmltvId, c.canonicalName, json(c.altNames), json(c.logos), now] as InValue[],
+    })),
+  );
+
+  // Los ids se leen DESPUÉS del upsert: los canales nuevos acaban de nacer y
+  // los viejos conservan el suyo, así que esta única consulta los tiene todos.
   const existing = await all<{ id: number; xmltv_id: string }>(
     'SELECT id, xmltv_id FROM channels',
   );
   const idByXmltv = new Map(existing.map((r) => [String(r.xmltv_id), Number(r.id)]));
 
-  await run('DELETE FROM channel_links');
-
   const keep = new Set<number>();
   const linkStatements: { sql: string; args: InValue[] }[] = [];
 
   for (const c of channels) {
-    let id = idByXmltv.get(c.xmltvId);
-    if (id === undefined) {
-      const res = await run(
-        `INSERT INTO channels (xmltv_id, canonical_name, alt_names_json, logos_json, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        [c.xmltvId, c.canonicalName, json(c.altNames), json(c.logos), now],
-      );
-      id = res.lastInsertRowid;
-    } else {
-      await run(
-        `UPDATE channels SET canonical_name = ?, alt_names_json = ?, logos_json = ?, updated_at = ?
-         WHERE id = ?`,
-        [c.canonicalName, json(c.altNames), json(c.logos), now, id],
-      );
-    }
+    const id = idByXmltv.get(c.xmltvId);
+    if (id === undefined) continue;
     keep.add(id);
     for (const l of c.links) {
       linkStatements.push({
@@ -251,7 +258,14 @@ export async function replaceChannels(
       });
     }
   }
-  await batch(linkStatements);
+
+  // El borrado entra en el mismo lote que las altas y no como sentencia suelta
+  // antes de ellas, por lo mismo que en `replaceMergedProgrammes`: si esto se
+  // corta a mitad, la tabla no puede quedar vacía. Contra Turso la atomicidad
+  // solo alcanza a cada trozo de 200 —las transacciones interactivas exigen
+  // websocket—, así que una interrupción aún deja vínculos a medias; lo que ya
+  // no puede hacer es dejar cero, que era el estado en que se quedó la guía.
+  await atomic([{ sql: 'DELETE FROM channel_links', args: [] }, ...linkStatements]);
 
   // Los canales que dejaron de existir se retiran, con sus programas.
   const gone = existing.filter((r) => !keep.has(Number(r.id))).map((r) => Number(r.id));

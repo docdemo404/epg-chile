@@ -85,7 +85,15 @@ se conecta al proyecto sin ese problema.
 **3. Los mismos valores como secrets del repo**, para que Actions escriba en la
 misma base: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`.
 
-**4. Desplegar:**
+**4. Opcional: que el panel pueda pedir una ingesta.** Con `EPG_GITHUB_REPO`
+(`usuario/repositorio`) y `EPG_GITHUB_TOKEN` (un token con scope `workflow`) en
+las variables de Vercel, añadir una guía desde el panel lanza el workflow de
+Actions y la guía entra en unos minutos en vez de esperar al cron de cada 6 h.
+Sin ellas todo funciona igual, solo que el aviso dice que hay que esperar —o
+lanzar el workflow a mano—. Es opcional a propósito: un token más es una
+decisión de quien despliega.
+
+**5. Desplegar:**
 
 ```bash
 vercel deploy --prod --prebuilt --archive=tgz
@@ -490,14 +498,22 @@ npm test
 | `DELETE /api/feeds/{id}` | Quitar una guía remota |
 
 Todo lo que toca las guías propias —subir o quitar un archivo, añadir, activar
-o quitar una URL— responde **202** en cuanto el cambio queda guardado, y deja
-el recálculo en segundo plano; su progreso se consulta en
-`GET /api/refresh/status`. No es un detalle de estilo: reingerir `uploads`
-vuelve a descargar cada guía remota, reescribe la capa cruda y refunde la
-ventana entera, minutos de trabajo contra los 60 s que dura una función en
-Vercel. Hacerlo dentro de la petición terminaba en un 504 del gateway aunque el
-cambio sí hubiera quedado guardado. Si el contenedor se congela antes de
-terminar tampoco se pierde: la ingesta de Actions parte de lo persistido.
+o quitar una URL— responde **202** en cuanto el cambio queda guardado, sin
+esperar a que la guía se rehaga. No es un detalle de estilo: reingerir
+`uploads` vuelve a descargar cada guía remota, reescribe la capa cruda y
+refunde la ventana entera, minutos de trabajo contra los 60 s que dura una
+función. Hacerlo dentro de la petición daba un 504 del gateway aunque el cambio
+sí hubiera quedado guardado.
+
+Dónde se rehace la guía depende de dónde corra el servidor:
+
+- **Con un proceso propio** (local o Docker), en segundo plano ahí mismo. La
+  respuesta trae el trabajo y su progreso se sigue en `GET /api/refresh/status`.
+- **En Vercel**, en GitHub Actions: la respuesta trae `job: null` y un aviso. Y
+  no es que "quizá no dé tiempo" —`POST /api/refresh` y `POST /api/rebuild`
+  devuelven **503** ahí por lo mismo—: reconstruir vacía `channel_links` para
+  volver a llenarla, y una función cortada a mitad dejó una vez la guía entera
+  sin un solo vínculo entre canal y fuente. Más vale no empezar.
 
 ## Añadir una fuente
 

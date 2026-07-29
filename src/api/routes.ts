@@ -4,7 +4,14 @@ import { loadAliases, loadConfig, saveAliases, type AliasEntry } from '../core/c
 import { slugify } from '../core/normalize.ts';
 import { guideEtag } from '../core/version.ts';
 import { defaultRange, rebuildChannels, rebuildMerge } from '../core/pipeline.ts';
-import { getJobState, isRunning, startRefresh, type JobState } from '../core/jobs.ts';
+import {
+  getJobState,
+  isRunning,
+  puedeReconstruir,
+  startRefresh,
+  type JobState,
+} from '../core/jobs.ts';
+import { dispararIngesta } from '../core/dispatch.ts';
 import { isEphemeral } from '../db/client.ts';
 import { fetchFeed, isSupportedUpload, listUploads, parseBuffer } from '../sources/uploads.ts';
 import { deleteFile, fileExists, safeName, storageKind, writeFile } from '../core/storage.ts';
@@ -45,27 +52,44 @@ const FORMATS: ExportFormat[] = ['json', 'xml', 'xml.gz'];
 const PACIENCIA_PANEL = { timeoutMs: 12_000, retries: 1 };
 
 /**
- * Deja en marcha la reconstrucción que exige cualquier cambio en las guías
+ * Pone en marcha la reconstrucción que exige cualquier cambio en las guías
  * —alta o baja de una URL, activarla, subir o borrar un archivo— y describe
  * qué va a pasar, sin esperarla.
  *
  * No se espera porque no cabe: reingerir `uploads` vuelve a descargar cada
- * guía remota, reescribe la capa cruda en Turso y refunde la ventana entera.
- * Son minutos contra los 60 s de la función, así que hacerlo dentro de la
- * petición terminaba siempre en 504 —y encima confundía, porque el cambio sí
- * había quedado guardado—. Ahora la petición responde en cuanto el cambio está
- * persistido y el trabajo se sigue por `/api/refresh/status`.
+ * guía remota, reescribe la capa cruda y refunde la ventana entera. Son
+ * minutos contra los 60 s de una función, así que hacerlo dentro de la
+ * petición terminaba en 504 —y encima confundía, porque el cambio sí había
+ * quedado guardado—.
  *
- * Si el contenedor se congela antes de terminar, no se pierde nada: la ingesta
- * de GitHub Actions parte de lo persistido y recoge el cambio igual.
+ * Dónde ocurre el trabajo depende de dónde corra esto (ver `puedeReconstruir`):
+ * con un proceso vivo detrás, aquí mismo en segundo plano; en una función de
+ * Vercel, en GitHub Actions, porque allí ni empezar es buena idea.
  */
-function incorporar(): { job: JobState; note: string } {
-  const enCurso = isRunning();
+async function incorporar(): Promise<{ job: JobState | null; note: string }> {
+  if (puedeReconstruir()) {
+    const enCurso = isRunning();
+    return {
+      job: startRefresh('uploads'),
+      note: enCurso
+        ? 'Ya había una actualización en curso: la guía se recalculará al terminar.'
+        : 'Incorporando a la guía…',
+    };
+  }
+
+  const res = await dispararIngesta();
+  if (res.lanzada) {
+    return {
+      job: null,
+      note: 'Lanzada la ingesta en GitHub Actions: la guía tarda unos minutos en reflejarlo.',
+    };
+  }
+  if (!res.sinConfigurar) console.warn(`  ! No se pudo lanzar la ingesta: ${res.motivo}`);
   return {
-    job: startRefresh('uploads'),
-    note: enCurso
-      ? 'Ya había una actualización en curso: la guía se recalculará al terminar.'
-      : 'Incorporando a la guía…',
+    job: null,
+    note:
+      'Guardado. La guía lo recogerá en la próxima ingesta, o antes si lanzas a mano el ' +
+      'workflow «Actualizar guía EPG» en GitHub Actions.',
   };
 }
 
@@ -404,6 +428,19 @@ export function registerApiRoutes(app: FastifyInstance): void {
    */
   app.post('/api/refresh', async (req, reply) => {
     const body = (req.body ?? {}) as { source?: string };
+    if (!puedeReconstruir()) {
+      const res = await dispararIngesta();
+      if (res.lanzada) {
+        return reply
+          .code(202)
+          .send({ dispatched: true, note: 'Lanzada la ingesta en GitHub Actions.' });
+      }
+      return reply.code(503).send({
+        error:
+          'La ingesta no cabe en una función de Vercel; la hace GitHub Actions. ' +
+          'Lanza el workflow «Actualizar guía EPG» desde GitHub.',
+      });
+    }
     if (isRunning()) {
       return reply.code(409).send({ error: 'Ya hay un refresco en curso', job: getJobState() });
     }
@@ -412,7 +449,25 @@ export function registerApiRoutes(app: FastifyInstance): void {
 
   app.get('/api/refresh/status', async () => getJobState() ?? { running: false, steps: [] });
 
-  app.post('/api/rebuild', async () => {
+  /*
+   * Recalcular sin descargar. Mismo techo que el refresco: refundir la ventana
+   * reescribe ~100.000 filas y no cabe en los 60 s de una función, así que allí
+   * se deriva a Actions en vez de dejar la guía a medio reconstruir.
+   */
+  app.post('/api/rebuild', async (_req, reply) => {
+    if (!puedeReconstruir()) {
+      const res = await dispararIngesta();
+      if (res.lanzada) {
+        return reply
+          .code(202)
+          .send({ dispatched: true, note: 'Lanzada la ingesta en GitHub Actions.' });
+      }
+      return reply.code(503).send({
+        error:
+          'Recalcular no cabe en una función de Vercel. Lanza el workflow ' +
+          '«Actualizar guía EPG» desde GitHub Actions.',
+      });
+    }
     const channels = await rebuildChannels();
     const merge = await rebuildMerge();
     return { channels: channels.stats, merge };
@@ -459,7 +514,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
       programmes: parsed.programmes.length,
     };
 
-    return reply.code(202).send({ upload: info, ...incorporar() });
+    return reply.code(202).send({ upload: info, ...(await incorporar()) });
   });
 
   app.delete('/api/uploads/:name', async (req, reply) => {
@@ -467,7 +522,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const safe = safeName(name);
     if (!(await fileExists(safe))) return reply.code(404).send({ error: 'No existe ese archivo' });
     await deleteFile(safe);
-    return reply.code(202).send({ deleted: safe, ...incorporar() });
+    return reply.code(202).send({ deleted: safe, ...(await incorporar()) });
   });
 
   // -------------------------------------------------------- guías por URL
@@ -515,14 +570,14 @@ export function registerApiRoutes(app: FastifyInstance): void {
       programmes: parsed.programmes.length,
     });
 
-    return reply.code(202).send({ feed, ...incorporar() });
+    return reply.code(202).send({ feed, ...(await incorporar()) });
   });
 
   app.delete('/api/feeds/:id', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
     if (!Number.isInteger(id)) return reply.code(400).send({ error: 'Id inválido' });
     if (!(await deleteFeedUrl(id))) return reply.code(404).send({ error: 'No existe esa guía' });
-    return reply.code(202).send({ deleted: id, ...incorporar() });
+    return reply.code(202).send({ deleted: id, ...(await incorporar()) });
   });
 
   /** Activa o desactiva una guía sin perder la URL ni su historial. */
@@ -536,7 +591,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     if (!(await setFeedUrlEnabled(id, enabled))) {
       return reply.code(404).send({ error: 'No existe esa guía' });
     }
-    return reply.code(202).send({ feed: await getFeedUrl(id), ...incorporar() });
+    return reply.code(202).send({ feed: await getFeedUrl(id), ...(await incorporar()) });
   });
 
   // ------------------------------------------------- unificación manual

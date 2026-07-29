@@ -600,6 +600,19 @@ async function seguirTrabajo(onTick = () => {}) {
   return null;
 }
 
+/**
+ * Espera el trabajo que dejó pedido un cambio en las guías, si lo hay.
+ *
+ * En Vercel no hay ninguno que seguir: la reconstrucción no cabe en una
+ * función y la hace GitHub Actions, así que la respuesta trae `job: null` y un
+ * aviso que explica qué va a pasar. Con un servidor propio detrás sí hay
+ * trabajo local y se sigue hasta el final.
+ */
+async function incorporacion(body, perdido) {
+  if (!body.job) return [body.note ?? 'Guardado', false];
+  return resumenTrabajo(await seguirTrabajo(), perdido);
+}
+
 /** Mensaje y gravedad de un trabajo terminado, para el toast. */
 function resumenTrabajo(job, perdido) {
   if (!job) return [perdido, true];
@@ -650,11 +663,10 @@ async function loadUploads() {
     el.querySelector('.del').addEventListener('click', async () => {
       if (!confirm(`¿Quitar "${f.name}"? Sus datos dejarán de aparecer en la guía.`)) return;
       try {
-        await api(`/api/uploads/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
-        toast('Archivo quitado; recalculando la guía…');
+        const r = await api(`/api/uploads/${encodeURIComponent(f.name)}`, { method: 'DELETE' });
+        toast('Archivo quitado');
         await loadUploads();
-        const job = await seguirTrabajo();
-        toast(...resumenTrabajo(job, 'Archivo quitado; desaparecerá en la próxima actualización'));
+        toast(...(await incorporacion(r, 'Archivo quitado; desaparecerá en la próxima actualización')));
         await Promise.all([loadUploads(), loadChannels(), loadStats(), loadSources()]);
       } catch (err) {
         toast(err.message, true);
@@ -676,8 +688,7 @@ async function uploadFile(file) {
     if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
     toast(`${body.upload.name}: ${body.upload.channels} canales, ${body.upload.programmes} progs`);
     await loadUploads();
-    const job = await seguirTrabajo();
-    toast(...resumenTrabajo(job, 'Archivo guardado; aparecerá en la próxima actualización'));
+    toast(...(await incorporacion(body, 'Archivo guardado; aparecerá en la próxima actualización')));
     await Promise.all([loadUploads(), loadChannels(), loadStats(), loadSources()]);
   } catch (err) {
     toast(err.message, true);
@@ -751,14 +762,13 @@ async function loadFeeds() {
     toggle.textContent = f.enabled ? '⏸' : '▶';
     toggle.addEventListener('click', async () => {
       try {
-        await api(`/api/feeds/${f.id}`, {
+        const r = await api(`/api/feeds/${f.id}`, {
           method: 'PATCH',
           body: JSON.stringify({ enabled: !f.enabled }),
         });
         toast(f.enabled ? 'Guía desactivada' : 'Guía activada');
         await loadFeeds();
-        const job = await seguirTrabajo();
-        toast(...resumenTrabajo(job, 'Hecho; se aplicará en la próxima actualización'));
+        toast(...(await incorporacion(r, 'Hecho; se aplicará en la próxima actualización')));
         await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
       } catch (err) {
         toast(err.message, true);
@@ -772,11 +782,10 @@ async function loadFeeds() {
     del.addEventListener('click', async () => {
       if (!confirm(`¿Quitar "${f.label}"? Sus datos dejarán de aparecer en la guía.`)) return;
       try {
-        await api(`/api/feeds/${f.id}`, { method: 'DELETE' });
-        toast('Guía quitada; recalculando…');
+        const r = await api(`/api/feeds/${f.id}`, { method: 'DELETE' });
+        toast('Guía quitada');
         await loadFeeds();
-        const job = await seguirTrabajo();
-        toast(...resumenTrabajo(job, 'Guía quitada; desaparecerá en la próxima actualización'));
+        toast(...(await incorporacion(r, 'Guía quitada; desaparecerá en la próxima actualización')));
         await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
       } catch (err) {
         toast(err.message, true);
@@ -799,8 +808,8 @@ async function addFeed() {
   btn.textContent = 'Comprobando…';
   try {
     // Esta llamada solo descarga la URL, la valida y la registra: vuelve en
-    // segundos. Incorporarla a la guía es el trabajo de fondo que se sigue
-    // debajo, y por eso el botón cambia de texto en vez de esperar callado.
+    // segundos. Incorporarla a la guía es otro trabajo, y por eso el botón
+    // cambia de texto en vez de esperar callado.
     const body = await api('/api/feeds', {
       method: 'POST',
       body: JSON.stringify({ url, label: labelInput.value.trim() || undefined }),
@@ -811,8 +820,7 @@ async function addFeed() {
     await loadFeeds();
 
     btn.textContent = 'Incorporando…';
-    const job = await seguirTrabajo();
-    toast(...resumenTrabajo(job, 'Guía añadida; aparecerá en la próxima actualización'));
+    toast(...(await incorporacion(body, 'Guía añadida; aparecerá en la próxima actualización')));
     await Promise.all([loadFeeds(), loadChannels(), loadStats(), loadSources()]);
   } catch (err) {
     toast(err.message, true);
@@ -894,7 +902,9 @@ $('#btn-rebuild').addEventListener('click', async (ev) => {
   btn.textContent = 'Recalculando…';
   try {
     const r = await api('/api/rebuild', { method: 'POST' });
-    toast(`${r.channels.total} canales · ${r.merge.output} programas`);
+    // En Vercel el recálculo no se hace aquí sino en Actions, y entonces la
+    // respuesta trae un aviso en vez de las cuentas.
+    toast(r.note ?? `${r.channels.total} canales · ${r.merge.output} programas`);
     await Promise.all([loadChannels(), loadStats(), loadSources()]);
   } catch (err) {
     toast(err.message, true);
@@ -909,17 +919,20 @@ $('#btn-refresh').addEventListener('click', async (ev) => {
   const btn = ev.currentTarget;
   btn.disabled = true;
 
+  const soltar = (mensaje, esError = false) => {
+    if (mensaje) toast(mensaje, esError);
+    btn.disabled = false;
+    btn.textContent = 'Actualizar fuentes';
+  };
+
   try {
-    await api('/api/refresh', { method: 'POST' });
+    const r = await api('/api/refresh', { method: 'POST' });
+    // En Vercel la ingesta la corre Actions: no hay trabajo local que seguir.
+    if (r.dispatched) return soltar(r.note);
   } catch (err) {
     // 409 significa que ya había un refresco corriendo: se sigue igualmente,
     // porque lo que interesa es ver su progreso.
-    if (!/en curso/i.test(err.message)) {
-      toast(err.message, true);
-      btn.disabled = false;
-      btn.textContent = 'Actualizar fuentes';
-      return;
-    }
+    if (!/en curso/i.test(err.message)) return soltar(err.message, true);
   }
 
   // El POST vuelve al instante; el progreso real se consulta aparte.
@@ -933,8 +946,7 @@ $('#btn-refresh').addEventListener('click', async (ev) => {
   toast(...resumenTrabajo(job, 'No se pudo seguir el progreso; la actualización continúa'));
 
   await Promise.all([loadChannels(), loadStats(), loadSources(), loadUploads()]);
-  btn.disabled = false;
-  btn.textContent = 'Actualizar fuentes';
+  soltar();
 });
 
 // ------------------------------------------------------------------- arranque
